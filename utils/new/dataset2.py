@@ -1,3 +1,58 @@
+
+'''
+
+该文件为新增文件，原本的 data.py 只能加载 MONAI 自带的变换。
+我们需要修改 generate_transforms 函数，让它也能识别我们刚刚写的 AddGlobalCoordinatesd。
+
+'''
+
+import logging
+from monai import transforms
+from monai.transforms import Compose
+
+# === 【新增】导入我们自定义的变换模块 ===
+import utils.new.custom_transforms as custom_transforms
+
+# ======================================
+
+logger = logging.getLogger(__name__)
+
+
+def generate_transforms(
+        transforms_config: list[dict],
+) -> list[transforms.Transform]:
+    """
+    根据配置生成数据变换管道
+    """
+    transform_list = []
+    logger.debug(f"Generating {len(transforms_config)} transforms")
+
+    for transform_config in transforms_config:
+        transform_name = next(iter(transform_config))
+        transform_kwargs = transform_config[transform_name]
+        logger.debug(
+            f"Generating transform {transform_name} with kwargs {transform_kwargs}"
+        )
+
+        # === 【修改核心逻辑】 ===
+        # 先尝试从 MONAI 标准库中加载
+        if hasattr(transforms, transform_name):
+            transform_cls = getattr(transforms, transform_name)
+        # 如果没有，尝试从我们的自定义模块加载
+        elif hasattr(custom_transforms, transform_name):
+            transform_cls = getattr(custom_transforms, transform_name)
+        else:
+            raise ImportError(f"无法找到变换类: {transform_name}，请检查是否拼写错误或未导入自定义模块。")
+
+        transform = transform_cls(**transform_kwargs)
+        # ======================
+
+        transform_list.append(transform)
+
+    return Compose(transform_list)
+
+
+# =========没动=============================
 import logging
 from typing import Tuple
 from pathlib import Path
@@ -9,57 +64,6 @@ from torch.utils.data import Dataset
 from utils.io import determine_reader_writer
 
 logger = logging.getLogger(__name__)
-
-
-# ========================================================
-
-import logging
-
-from monai import transforms
-from monai.transforms import Compose
-
-logger = logging.getLogger(__name__)
-
-
-def generate_transforms(
-        transforms_config: list[dict],
-) -> list[transforms.Transform]:
-    """
-    根据配置生成数据变换管道
-    训练和推理过程中使用的数据增强和预处理变换。
-    Args:
-        transforms_config (list[dict]): 变换配置列表，每个字典包含变换名称和参数
-    Returns:
-        Compose: 组合后的变换管道对象
-    """
-
-    transform_list = []  # 存储变换对象的列表
-    logger.debug(f"Generating {len(transforms_config)} transforms")  # 记录变换数量
-
-    # 遍历所有变换配置
-    for transform_config in transforms_config:
-        # 获取变换名称（字典的第一个键）
-        transform_name = next(iter(transform_config))
-        # 获取变换的参数配置
-        transform_kwargs = transform_config[transform_name]
-        logger.debug(
-            f"Generating transform {transform_name} with kwargs {transform_kwargs}"
-        )
-        # 使用反射机制动态创建变换对象
-        # 从MONAI的transforms模块中获取对应的变换类并实例化
-        transform: transforms.Transform = getattr(transforms, transform_name)(
-            **transform_kwargs  # 使用关键字参数初始化
-        )  # type: ignore
-        transform_list.append(transform)  # 将变换添加到列表中
-
-    # 将所有变换组合成一个管道，按顺序执行
-    return Compose(transform_list)  # type: ignore
-
-# ========================================================
-
-
-
-
 class UnionDataset(Dataset):
     """
     联合数据集类，用于将多个数据集合并为一个统一的数据集。
@@ -148,6 +152,5 @@ class UnionDataset(Dataset):
 
             # 返回处理后的图像和二值化的掩码
             return transformed['Image'], transformed['Mask'] > 0
-
 
 

@@ -8,16 +8,20 @@ defaults:
 # 实验参数配置
 num_shots: 3        # 零样本模式：直接使用预训练模型进行推理，不进行微调
 lr: 0.00001         # 学习率设置（10^-5），适用于零样本评估的优化器初始化
-devices: [0]        # 使用单个 GPU（设备索引 0）进行计算
+devices: [0,1,2,3]        # 使用单个 GPU（设备索引 0）进行计算
+devices_num: 2
 run_name:  # 实验运行名称，用于日志记录和模型保存路径标识
 
+
 # 路径配置（需要用户修改）
-path_to_chkpt: /home/yangrui/Project/Base-models/local_results/checkpoints/base.pt # TODO: 预训练模型权重文件路径
+path_to_chkpt: /home/yangrui/Project/Base-model/local_results/checkpoints/base.pt # TODO: 预训练模型权重文件路径
 chkpt_folder: /home/yangrui/Project/Base-models/local_results/checkpoints # TODO: 检查点保存目录
 
 # 数据加载器配置
 dataloader:
   shuffle: False    # 验证/测试阶段不需要打乱数据顺序，确保结果可复现
+
+
 
 # 训练器配置（对应 PyTorch Lightning Trainer）
 trainer:

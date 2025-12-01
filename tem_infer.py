@@ -20,7 +20,7 @@ from skimage.exposure import equalize_hist
 from skimage.measure import label, regionprops
 
 # 保持原有的引用不变
-from utils.data import generate_transforms
+from utils.dataset import generate_transforms
 from utils.io import determine_reader_writer
 from utils.evaluation import Evaluator, calculate_mean_metrics
 
@@ -180,7 +180,7 @@ def main(cfg):
 
     logger.info(f"Using device {cfg.device}.")
     if(cfg.device == "cuda"):
-        cfg.device = "cuda:7"
+        cfg.device = "cuda:0"
     device = torch.device(cfg.device)
 
     model = load_model(cfg, device)

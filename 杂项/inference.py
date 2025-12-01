@@ -8,7 +8,6 @@
 import logging
 import warnings
 from pathlib import Path
-import re
 
 import torch
 import torch.nn.functional as F
@@ -17,10 +16,9 @@ import numpy as np
 from tqdm import tqdm
 from monai.inferers import SlidingWindowInfererAdapt
 from skimage.morphology import remove_small_objects
-from skimage.exposure import equalize_hist
 from skimage.measure import label, regionprops
 
-from utils.data import generate_transforms
+from utils.new.data import generate_transforms
 from utils.io import determine_reader_writer
 from utils.evaluation import Evaluator, calculate_mean_metrics
 

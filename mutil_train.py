@@ -198,7 +198,7 @@ def main(cfg):
     # 【修改点】配置多卡训练参数
     # ---------------------------------------------------------
     # 确定使用的 GPU 数量
-    num_devices = 8  # 强制设置为 8 卡，或者读取 len(cfg.devices)
+    num_devices = cfg.devices_num  # 强制设置为 2 卡，或者读取 len(cfg.devices)
 
     # 实例化 Trainer
     trainer_cls = hydra.utils.instantiate(cfg.trainer.lightning_trainer)

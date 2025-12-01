@@ -4,4 +4,4 @@ defaults:
 
 imageCAS:
   sample_prop: 1
-  path: /home/yangrui/Project/Base-models/datasets/imageCAS/ImageCAS-original
+  path: /home/yangrui/Project/Base-model/datasets/imageCAS/imageCAS-clip

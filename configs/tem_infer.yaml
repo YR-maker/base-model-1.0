@@ -5,7 +5,7 @@ defaults:
 
 # --- 输入输出路径配置 ---
 # image_path: 指向包含所有子文件夹（如900, 901...）的父目录
-image_path: /home/yangrui/Project/Base-models/datasets/imageCAS/ImageCAS-original/test
+image_path: /home/yangrui/Project/Base-model/datasets/imageCAS/imageCAS-ROI/test
 # output_folder: 结果保存位置
 output_folder: None
 
@@ -24,9 +24,9 @@ round_to: 2
 strict_matching: true
 
 # --- 推理配置 ---
-device: cuda
+device: cuda:0
 # 你的权重文件路径
-ckpt_path: /home/yangrui/Project/Base-models/local_results/checkpoints/base.pt
+ckpt_path: /home/yangrui/Project/Base-model/local_results/checkpoints/base.pt
 
 # --- 滑动窗口设置 ---
 batch_size: 8                     # 滑动窗口批处理大小
