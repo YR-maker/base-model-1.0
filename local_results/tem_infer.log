@@ -1,0 +1,23 @@
+[2025-11-07 09:54:23,129][__main__][INFO] - Using device cuda:0.
+[2025-11-07 09:54:23,129][__main__][INFO] - Loading model from /home/yangrui/Project/Base-model/checkpoints/Base-model/finetune_1shot_IMAGECAS_imageCAS_200_finetune_experiment/finetune_1shot_IMAGECAS_imageCAS_200_finetune_experiment_last.ckpt.
+[2025-11-07 09:54:24,413][__main__][INFO] - 检测到PyTorch Lightning格式的.ckpt文件
+[2025-11-07 09:54:24,441][__main__][INFO] - 模型权重严格加载成功
+[2025-11-07 09:54:24,442][__main__][INFO] - 所有键都匹配成功
+[2025-11-07 09:54:24,442][__main__][INFO] - 模型加载成功。
+[2025-11-07 09:54:24,461][__main__][INFO] - Found 1 images in /home/yangrui/Project/Base-model/input/img.
+[2025-11-07 09:55:48,089][__main__][INFO] - Using device cuda:0.
+[2025-11-07 09:55:48,089][__main__][INFO] - Loading model from /home/yangrui/Project/Base-model/checkpoints/Base-model/finetune_1shot_IMAGECAS_imageCAS_200_finetune_experiment/finetune_1shot_IMAGECAS_imageCAS_200_finetune_experiment_last.ckpt.
+[2025-11-07 09:55:49,741][__main__][INFO] - 检测到PyTorch Lightning格式的.ckpt文件
+[2025-11-07 09:55:49,777][__main__][INFO] - 模型权重严格加载成功
+[2025-11-07 09:55:49,777][__main__][INFO] - 所有键都匹配成功
+[2025-11-07 09:55:49,777][__main__][INFO] - 模型加载成功。
+[2025-11-07 09:55:49,802][__main__][INFO] - Found 1 images in /home/yangrui/Project/Base-model/input/img.
+[2025-11-07 09:55:53,851][__main__][INFO] - Done.
+[2025-11-07 11:02:51,302][__main__][INFO] - Using device cuda:0.
+[2025-11-07 11:02:51,302][__main__][INFO] - Loading model from /home/yangrui/Project/Base-model/checkpoints/Base-model/finetune_1shot_IMAGECAS_imageCAS_200_finetune_experiment/finetune_1shot_IMAGECAS_imageCAS_200_finetune_experiment_last.ckpt.
+[2025-11-07 11:02:52,548][__main__][INFO] - 检测到PyTorch Lightning格式的.ckpt文件
+[2025-11-07 11:02:52,579][__main__][INFO] - 模型权重严格加载成功
+[2025-11-07 11:02:52,579][__main__][INFO] - 所有键都匹配成功
+[2025-11-07 11:02:52,579][__main__][INFO] - 模型加载成功。
+[2025-11-07 11:02:52,601][__main__][INFO] - Found 1 images in /home/yangrui/Project/Base-model/input/img.
+[2025-11-07 11:02:55,750][__main__][INFO] - Done.

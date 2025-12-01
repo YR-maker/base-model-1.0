@@ -1,0 +1,92 @@
+defaults:
+  - hydra: default
+  - model: dyn_unet_base
+  - _self_
+
+# --- 输入输出路径配置 ---
+# image_path: 指向包含所有子文件夹（如900, 901...）的父目录
+image_path: /home/yangrui/Project/Base-models/datasets/imageCAS/ImageCAS-original/test
+# output_folder: 结果保存位置
+output_folder: None
+
+# --- 文件名匹配规则 ---
+# 脚本将寻找: {CaseID}/{CaseID}.img.nii.gz
+image_file_ending: .img.nii.gz
+# 脚本将寻找: {CaseID}/{CaseID}.label.nii.gz
+# 如果不需要评估，可以将 mask_suffix 设为 null
+mask_suffix: .label.nii.gz
+
+# 兼容旧配置项（逻辑中作为评估开关使用）
+mask_path: "auto"  # 设置为非空值以开启评估逻辑
+
+file_app: ""
+round_to: 2
+strict_matching: true
+
+# --- 推理配置 ---
+device: cuda
+# 你的权重文件路径
+ckpt_path: /home/yangrui/Project/Base-models/local_results/checkpoints/base.pt
+
+# --- 滑动窗口设置 ---
+batch_size: 8                     # 滑动窗口批处理大小
+patch_size: [128, 128, 128]       # 滑动窗口大小（与训练时一致）
+overlap: 0.5                       # 窗口重叠率（50%重叠）
+mode: "constant"                   # 边缘融合模式
+sigma_scale: 0.125                # 高斯加权融合的标准差尺度
+padding_mode: "constant"           # 填充模式
+
+
+# 评估和可复现性配置
+seed: 404                          # 随机种子（确保结果可复现）
+
+
+
+# 后处理配置
+# 对应论文中提到的分割结果优化
+post:
+  apply: false                     # 是否应用后处理
+  small_objects_min_size: 500      # 小连通区域最小体素数
+  small_objects_connectivity: 3    # 连通性定义（3D 6连通）
+
+  keep_largest_vessels: true       # 新增：是否保留最大血管
+  num_largest_vessels: 4           # 新增：保留的最大血管数量
+
+  keep_closest_vessels: false       # 开启：保留距离中心最近的血管
+  num_closest_vessels: 5           # 保留的数量
+
+
+
+# 测试时增强配置
+# 对应论文中提升推理鲁棒性的多尺度策略
+tta:
+  scales: [1] #[0.5, 1, 1.5]      # 多尺度推理比例（当前仅使用1倍）
+  invert: false                    # 是否进行图像反转增强
+  invert_mean_thresh: 0.5          # 反转阈值（图像均值>0.5时反转）
+  equalize_hist: false            # 是否进行直方图均衡化
+  hist_bins: 100                   # 直方图均衡化的bin数量
+
+
+# 标准预处理变换管道
+# 对应论文中与训练一致的数据预处理流程
+transforms_config:
+  - EnsureChannelFirst:            # 确保通道维度在前
+      channel_dim: "no_channel"    # 无通道维度时添加
+
+
+  - ScaleIntensityRangePercentiles: # 基于百分位数的强度归一化
+      lower: 1                     # 下限百分位（1%）
+      upper: 99                    # 上限百分位（99%）
+      b_min: 0                     # 归一化后最小值
+      b_max: 1                     # 归一化后最大值
+      clip: true                   # 裁剪超出范围的值
+  - ToTensor:                      # 转换为PyTorch张量
+      device: null                 # 设备设置（null表示当前设备）
+
+
+# 多尺度预测结果融合配置
+merging:
+  threshold: 0.5                  # 二值化阈值
+  max: false                       # 融合方式：false=平均，true=最大响应
+
+
