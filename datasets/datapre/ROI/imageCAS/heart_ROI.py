@@ -78,7 +78,7 @@ def extract_heart_advanced(input_path, output_path,
     # 8. 保存结果
     # 背景设为 -1024 (空气)
     masked_data = data.copy()
-    masked_data[~final_mask] = -200
+    masked_data[~final_mask] = -1000
 
     new_img = nib.Nifti1Image(masked_data, affine, img.header)
     nib.save(new_img, output_path)
@@ -90,10 +90,10 @@ def extract_heart_advanced(input_path, output_path,
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='高级心脏区域提取')
     parser.add_argument('--input', '-i', type=str,
-                        default="/home/yangrui/Project/Base-model/datasets/datapre/ROI/imageCAS/data/img/3.img.nii.gz",
+                        default="/home/yangrui/Project/Base-model/datasets/datapre/ROI/imageCAS/data/img/971.img.nii.gz",
                         help='输入文件路径')
     parser.add_argument('--output', '-o', type=str,
-                        default="/home/yangrui/Project/Base-model/datasets/datapre/ROI/imageCAS/data/output/3_ROI.nii.gz",
+                        default="/home/yangrui/Project/Base-model/datasets/datapre/ROI/imageCAS/data/output/971_ROI.nii.gz",
                         help='输出文件路径')
 
 
@@ -101,7 +101,7 @@ if __name__ == "__main__":
     parser.add_argument('--erode', type=int,
                         default=12, help='腐蚀半径 (用于断开粘连)')
     parser.add_argument('--dilate', type=int,
-                        default=25, help='膨胀半径 (用于包裹冠脉)')
+                        default=14, help='膨胀半径 (用于包裹冠脉)')
 
     args = parser.parse_args()
 

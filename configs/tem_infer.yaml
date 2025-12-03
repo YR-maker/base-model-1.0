@@ -5,9 +5,9 @@ defaults:
 
 # --- 输入输出路径配置 ---
 # image_path: 指向包含所有子文件夹（如900, 901...）的父目录
-image_path: /home/yangrui/Project/Base-model/datasets/imageCAS/imageCAS-ROI-Hull/train
+image_path: /home/yangrui/Project/Base-model/datasets/imageCAS/imageCAS-ROI/val
 # output_folder: 结果保存位置
-output_folder: null
+output_folder: /home/yangrui/Project/Base-model/local_results/output/imageCAS/base-ROI-test
 
 # --- 文件名匹配规则 ---
 # 脚本将寻找: {CaseID}/{CaseID}.img.nii.gz
@@ -26,8 +26,7 @@ strict_matching: true
 # --- 推理配置 ---
 device: cuda:0
 # 你的权重文件路径
-ckpt_path: /home/yangrui/Project/Base-model/local_results/checkpoints/Base-model/3shot_imageCAS-ROI_old/step:150_val_DiceMetric:0.59.ckpt
-
+ckpt_path: /home/yangrui/Project/Base-model/local_results/checkpoints/base.pt
 
 
 
