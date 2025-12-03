@@ -9,16 +9,16 @@ from concurrent.futures import ProcessPoolExecutor  # 引入多进程加速
 
 # ================= 配置区域 =================
 # 输入数据的根目录
-SRC_ROOT = "/home/yangrui/Project/Base-models/datasets/imageCAS/imageCAS-clip/1-100"
+SRC_ROOT = "/home/yangrui/Project/Base-model/datasets/imageCAS/imageCAS-clip"
 
 # 输出数据的根目录 (自动创建)
-DST_ROOT = "/home/yangrui/Project/Base-models/datasets/imageCAS/imageCAS-ROI"
+DST_ROOT = "/home/yangrui/Project/Base-model/datasets/imageCAS/imageCAS-ROI-200"
 
 # 需要处理的子集文件夹
 SUBSETS = ["train", "val", "test"]
 
 # 你的成功参数
-PARAM_THRESH = -300
+PARAM_THRESH = -200
 PARAM_ERODE = 12
 PARAM_DILATE = 20
 
@@ -29,7 +29,7 @@ COPY_LABELS = True
 # ===========================================
 
 def extract_heart_advanced(input_path, output_path,
-                           threshold_hu=-300,
+                           threshold_hu=-200,
                            erosion_radius=12,
                            dilation_radius=20):
     """
@@ -71,7 +71,7 @@ def extract_heart_advanced(input_path, output_path,
 
         # 7. 应用遮罩 (-1024)
         masked_data = data.copy()
-        masked_data[~final_mask] = -1024
+        masked_data[~final_mask] = -200
 
         # 8. 保存
         new_img = nib.Nifti1Image(masked_data, affine, header)

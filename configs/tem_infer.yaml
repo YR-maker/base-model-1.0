@@ -5,9 +5,9 @@ defaults:
 
 # --- 输入输出路径配置 ---
 # image_path: 指向包含所有子文件夹（如900, 901...）的父目录
-image_path: /home/yangrui/Project/Base-model/datasets/imageCAS/imageCAS-ROI/test
+image_path: /home/yangrui/Project/Base-model/datasets/imageCAS/imageCAS-ROI-Hull/train
 # output_folder: 结果保存位置
-output_folder: None
+output_folder: null
 
 # --- 文件名匹配规则 ---
 # 脚本将寻找: {CaseID}/{CaseID}.img.nii.gz
@@ -26,7 +26,12 @@ strict_matching: true
 # --- 推理配置 ---
 device: cuda:0
 # 你的权重文件路径
-ckpt_path: /home/yangrui/Project/Base-model/local_results/checkpoints/base.pt
+ckpt_path: /home/yangrui/Project/Base-model/local_results/checkpoints/Base-model/3shot_imageCAS-ROI_old/step:150_val_DiceMetric:0.59.ckpt
+
+
+
+
+
 
 # --- 滑动窗口设置 ---
 batch_size: 8                     # 滑动窗口批处理大小
@@ -46,14 +51,14 @@ seed: 404                          # 随机种子（确保结果可复现）
 # 对应论文中提到的分割结果优化
 post:
   apply: false                     # 是否应用后处理
-  small_objects_min_size: 500      # 小连通区域最小体素数
-  small_objects_connectivity: 3    # 连通性定义（3D 6连通）
+  small_objects_min_size: 100      # 小连通区域最小体素数
+  small_objects_connectivity: 5    # 连通性定义（3D 6连通）
 
   keep_largest_vessels: true       # 新增：是否保留最大血管
   num_largest_vessels: 4           # 新增：保留的最大血管数量
 
   keep_closest_vessels: false       # 开启：保留距离中心最近的血管
-  num_closest_vessels: 5           # 保留的数量
+  num_closest_vessels: 3           # 保留的数量
 
 
 

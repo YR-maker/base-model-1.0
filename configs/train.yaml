@@ -26,9 +26,9 @@ devices: [0,1,2,3]                   # 使用GPU设备编号：单卡训练，�
 
 # ==================== 日志与监控配置 ====================
 # 实验跟踪和结果记录
-run_name: Base-models             # 实验运行名称标识
-wandb_project: Base-models        # Weights & Biases项目名称
-chkpt_folder: /home/yangrui/Project/Base-models/checkpoints #TODO 模型检查点保存目录（需填写实际路径）
+run_name: Base-model             # 实验运行名称标识
+wandb_project: Base-model        # Weights & Biases项目名称
+chkpt_folder: /home/yangrui/Project/Base-model/checkpoints #TODO 模型检查点保存目录（需填写实际路径）
 offline: False                 # W&B在线模式：False表示实时同步到云端服务器
 
 # ==================== 数据加载器优化配置 ====================

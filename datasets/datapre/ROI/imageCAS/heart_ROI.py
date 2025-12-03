@@ -78,7 +78,7 @@ def extract_heart_advanced(input_path, output_path,
     # 8. 保存结果
     # 背景设为 -1024 (空气)
     masked_data = data.copy()
-    masked_data[~final_mask] = -1024
+    masked_data[~final_mask] = -200
 
     new_img = nib.Nifti1Image(masked_data, affine, img.header)
     nib.save(new_img, output_path)
@@ -90,9 +90,13 @@ def extract_heart_advanced(input_path, output_path,
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='高级心脏区域提取')
     parser.add_argument('--input', '-i', type=str,
-                        default="/home/yangrui/Project/Base-models/datasets/datapre/ROI/imageCAS/data/img/7.img.nii.gz", help='输入文件路径')
+                        default="/home/yangrui/Project/Base-model/datasets/datapre/ROI/imageCAS/data/img/3.img.nii.gz",
+                        help='输入文件路径')
     parser.add_argument('--output', '-o', type=str,
-                        default="/home/yangrui/Project/Base-models/datasets/datapre/ROI/imageCAS/data/output/7_ROI.nii.gz", help='输出文件路径')
+                        default="/home/yangrui/Project/Base-model/datasets/datapre/ROI/imageCAS/data/output/3_ROI.nii.gz",
+                        help='输出文件路径')
+
+
     # 增加参数调整接口
     parser.add_argument('--erode', type=int,
                         default=12, help='腐蚀半径 (用于断开粘连)')

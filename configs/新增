@@ -1,7 +1,7 @@
-configs/tem_train2.yaml
-configs/data/default_finetune2.yaml
+
 utils/new/custom_transforms.py
 utils/new/dataset2.py
 models/wrapper.py
-
+losses.py
+loss_train.yaml
 
