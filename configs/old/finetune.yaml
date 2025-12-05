@@ -1,7 +1,7 @@
 # 默认配置继承链
-# 使用 Hydra 的默认值机制，按顺序加载 train.yaml 和 eval_smile.yaml 中的配置
+# 使用 Hydra 的默认值机制，按顺序加载 fine-tuning.yaml 和 eval_smile.yaml 中的配置
 defaults:
-  - train
+  - fine-tuning
   - override data: test_imageCAS  # 添加 override 关键字
   - _self_         # 当前文件的配置拥有最高优先级
 

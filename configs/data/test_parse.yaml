@@ -1,7 +1,0 @@
-defaults:
-  - default_finetune@PARSE
-  - _self_
-
-PARSE:
-  sample_prop: 1
-  path: /home/yangrui/Project/Base-models/input #TODO

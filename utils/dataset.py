@@ -72,7 +72,7 @@ class UnionDataset(Dataset):
 
         Args:
             dataset_configs: 数据集配置字典，包含各个数据集的配置信息
-            mode: 数据集模式（如'train', 'val', 'test'）
+            mode: 数据集模式（如'fine-tuning', 'val', 'test'）
             finetune: 是否为微调模式，影响数据采样策略
         """
         super().__init__()

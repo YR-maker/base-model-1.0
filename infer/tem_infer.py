@@ -1,22 +1,21 @@
 """
-模型推理脚本 - 适配嵌套文件夹结构
-结构: Root/CaseID/CaseID.img.nii.gz & CaseID.label.nii.gz
-新增功能: output_folder 为空时不保存文件，仅评估
-修改功能: 最后打印所有平均评估指标
+多GPU模型推理脚本
+功能: 自动将数据集切分到多个GPU上并行推理，最后汇总指标。
 """
 import logging
 import warnings
 from pathlib import Path
-import re
+import math
+import os
 
 import torch
 import torch.nn.functional as F
+import torch.multiprocessing as mp
 import hydra
 import numpy as np
 from tqdm import tqdm
 from monai.inferers import SlidingWindowInfererAdapt
 from skimage.morphology import remove_small_objects
-from skimage.exposure import equalize_hist
 from skimage.measure import label, regionprops
 
 # 保持原有的引用不变
@@ -25,38 +24,37 @@ from utils.io import determine_reader_writer
 from utils.evaluation import Evaluator, calculate_mean_metrics
 
 warnings.filterwarnings("ignore")
+# 配置多进程启动方式，CUDA必须使用 spawn
+try:
+    mp.set_start_method('spawn', force=True)
+except RuntimeError:
+    pass
+
 logger = logging.getLogger(__name__)
 
 
 def load_model(cfg, device):
-    """
-    加载模型权重 (保持不变)
-    """
+    """加载模型权重"""
     ckpt_path = Path(cfg.ckpt_path)
-    logger.info(f"Loading models from {ckpt_path}.")
-
     if not ckpt_path.exists():
         raise FileNotFoundError(f"模型文件不存在: {ckpt_path}")
 
     try:
+        # map_location 确保加载到正确的 GPU
         ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
     except Exception as e:
-        logger.error(f"加载模型文件失败: {e}")
-        raise
+        raise RuntimeError(f"加载模型失败: {e}")
 
     model = hydra.utils.instantiate(cfg.model)
     state_dict_to_load = None
 
     if 'state_dict' in ckpt:
-        logger.info("检测到PyTorch Lightning格式的.ckpt文件")
         state_dict = ckpt['state_dict']
         new_state_dict = {}
         for key, value in state_dict.items():
-            # 移除常见前缀 (新增 model. )
             key = key.replace('model.', '').replace('models.', '').replace('net.', '').replace('module.', '')
             new_state_dict[key] = value
         state_dict_to_load = new_state_dict
-
     elif isinstance(ckpt, dict) and any(key.startswith(('encoder', 'decoder', 'backbone')) for key in ckpt.keys()):
         state_dict_to_load = ckpt
     else:
@@ -65,9 +63,7 @@ def load_model(cfg, device):
     if state_dict_to_load is not None:
         try:
             model.load_state_dict(state_dict_to_load, strict=True)
-            logger.info("模型权重严格加载成功")
-        except RuntimeError as e:
-            logger.warning(f"严格加载失败: {e}，尝试非严格加载")
+        except RuntimeError:
             model.load_state_dict(state_dict_to_load, strict=False)
     else:
         raise ValueError("权重文件格式不支持")
@@ -76,11 +72,8 @@ def load_model(cfg, device):
 
 
 def get_paths_nested(cfg):
-    """
-    专门适配嵌套结构的路径获取函数 (保持不变)
-    """
+    """获取所有文件路径"""
     root_dir = Path(hydra.utils.to_absolute_path(cfg.image_path))
-
     if not root_dir.exists():
         raise FileNotFoundError(f"输入目录不存在: {root_dir}")
 
@@ -100,24 +93,18 @@ def get_paths_nested(cfg):
             if cfg.get('mask_suffix') and cfg.get('mask_path'):
                 label_name = f"{case_id}{cfg.mask_suffix}"
                 label_p = case_dir / label_name
-
                 if label_p.exists():
                     mask_paths.append(label_p)
                 elif cfg.get('strict_matching', False):
                     logger.warning(f"Case {case_id}: 未找到标签文件 {label_name}")
-        else:
-            logger.debug(f"Case {case_id}: 未找到图像文件 {img_name}，跳过。")
 
     if not image_paths:
-        raise FileNotFoundError(f"未在 {root_dir} 的子文件夹中找到任何符合规则的图像。")
+        raise FileNotFoundError(f"未找到符合规则的图像。")
 
     if mask_paths and len(mask_paths) != len(image_paths):
-        logger.warning(f"警告：图像数量 ({len(image_paths)}) 与 标签数量 ({len(mask_paths)}) 不一致。")
         if cfg.get('strict_matching', True):
-            logger.error("严格模式开启：标签不匹配，停止运行。")
             raise ValueError("标签数量不匹配")
         else:
-            logger.warning("非严格模式：将禁用评估功能。")
             mask_paths = None
 
     if not mask_paths:
@@ -127,7 +114,6 @@ def get_paths_nested(cfg):
 
 
 def resample(image, factor=None, target_shape=None):
-    """保持不变"""
     if factor == 1: return image
     if target_shape:
         _, _, new_d, new_h, new_w = target_shape
@@ -137,8 +123,8 @@ def resample(image, factor=None, target_shape=None):
     return F.interpolate(image, size=(new_d, new_h, new_w), mode="trilinear", align_corners=False)
 
 
+# --- 后处理辅助函数 ---
 def keep_largest_vessels(prediction, num_vessels=3):
-    """保持不变"""
     if isinstance(prediction, torch.Tensor): prediction = prediction.cpu().numpy()
     prediction = prediction.astype(int)
     labeled_mask = label(prediction, connectivity=3)
@@ -151,9 +137,7 @@ def keep_largest_vessels(prediction, num_vessels=3):
         processed_mask[coords[:, 0], coords[:, 1], coords[:, 2]] = 1
     return processed_mask
 
-
 def keep_closest_vessels(prediction, num_vessels=3):
-    """保持不变"""
     if isinstance(prediction, torch.Tensor): prediction = prediction.cpu().numpy()
     prediction = prediction.astype(int)
     labeled_mask = label(prediction, connectivity=3)
@@ -168,40 +152,29 @@ def keep_closest_vessels(prediction, num_vessels=3):
     return processed_mask
 
 
-@hydra.main(config_path="configs", config_name="tem_infer", version_base="1.3.2")
-def main(cfg):
+def run_inference_worker(rank, gpu_id, image_paths, mask_paths, cfg, return_dict):
     """
-    推理主函数
+    单个 Worker 进程：负责在一个 GPU 上跑一部分数据
     """
-    np.random.seed(cfg.seed)
-    torch.manual_seed(cfg.seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(cfg.seed)
+    device = torch.device(f"cuda:{gpu_id}")
 
-    logger.info(f"Using device {cfg.device}.")
-    if(cfg.device == "cuda"):
-        cfg.device = "cuda:0"
-    device = torch.device(cfg.device)
+    # 设置随机种子
+    np.random.seed(cfg.seed + rank)
+    torch.manual_seed(cfg.seed + rank)
+    torch.cuda.manual_seed_all(cfg.seed + rank)
 
-    model = load_model(cfg, device)
-    model.to(device)
-    model.eval()
+    # 加载模型
+    try:
+        model = load_model(cfg, device)
+        model.to(device)
+        model.eval()
+    except Exception as e:
+        print(f"[GPU {gpu_id}] 模型加载失败: {e}")
+        return
 
     transforms = generate_transforms(cfg.transforms_config)
 
-    image_paths, mask_paths = get_paths_nested(cfg)
-
-    # Output Folder Logic
-    save_predictions = False
-    output_folder = None
-    if cfg.output_folder and str(cfg.output_folder).lower() != "none" and str(cfg.output_folder).strip() != "":
-        save_predictions = True
-        output_folder = Path(cfg.output_folder)
-        output_folder.mkdir(parents=True, exist_ok=True)
-        logger.info(f"预测结果将保存至: {output_folder}")
-    else:
-        logger.info("未设置 output_folder 或设置为空。将跳过保存预测文件，仅进行评估。")
-
+    # 确定 I/O
     first_name = image_paths[0].name
     if 'nii.gz' in first_name:
         rw_suffix = 'nii.gz'
@@ -222,17 +195,31 @@ def main(cfg):
         padding_mode=cfg.padding_mode
     )
 
-    metrics_dict = {}
+    local_metrics = {}
+
+    # 输出设置
+    save_predictions = False
+    output_folder = None
+    if cfg.output_folder and str(cfg.output_folder).lower() != "none":
+        save_predictions = True
+        output_folder = Path(cfg.output_folder)
+        output_folder.mkdir(parents=True, exist_ok=True)
+
+    # 进度条
+    desc = f"GPU {gpu_id}"
+    # 使用 position 让进度条不重叠，rank 0 在最上面
+    iterator = tqdm(enumerate(image_paths), total=len(image_paths), desc=desc, position=rank, leave=True)
 
     with torch.no_grad():
-        for idx, image_path in tqdm(enumerate(image_paths), total=len(image_paths), desc="Inference"):
+        for idx, image_path in iterator:
             preds = []
             try:
                 img_data = image_reader_writer.read_images(image_path)[0].astype(np.float32)
             except Exception as e:
-                logger.error(f"读取图像失败 {image_path}: {e}")
+                print(f"[GPU {gpu_id}] 读取失败 {image_path}: {e}")
                 continue
 
+            # --- TTA & 推理 ---
             for scale in cfg.tta.scales:
                 image_tensor = transforms(img_data)
                 if isinstance(image_tensor, np.ndarray):
@@ -241,20 +228,17 @@ def main(cfg):
                     image_tensor = image_tensor.unsqueeze(0)
                 image = image_tensor.unsqueeze(0).to(device)
 
-                mask = None
-                if mask_paths and idx < len(mask_paths):
-                    mask_data = image_reader_writer.read_images(mask_paths[idx])[0]
-                    mask = torch.tensor(mask_data).bool()
-
                 if cfg.tta.invert and image.mean() > cfg.tta.invert_mean_thresh:
                     image = 1 - image
 
                 original_shape = image.shape
                 image = resample(image, factor=scale)
+
                 logits = inferer(image, model)
                 logits = resample(logits, target_shape=original_shape)
                 preds.append(logits.cpu().squeeze())
 
+            # --- 融合 ---
             if len(preds) > 1:
                 stacked_preds = torch.stack(preds)
                 if cfg.merging.max:
@@ -266,6 +250,7 @@ def main(cfg):
 
             pred_thresh = (pred > cfg.merging.threshold).numpy()
 
+            # --- 后处理 ---
             if cfg.post.apply:
                 pred_thresh = remove_small_objects(
                     pred_thresh.astype(bool),
@@ -273,57 +258,121 @@ def main(cfg):
                     connectivity=cfg.post.small_objects_connectivity
                 )
             if cfg.post.get('keep_largest_vessels', False):
-                pred_thresh = keep_largest_vessels(
-                    pred_thresh.astype(int),
-                    num_vessels=cfg.post.num_largest_vessels
-                )
+                pred_thresh = keep_largest_vessels(pred_thresh.astype(int), cfg.post.num_largest_vessels)
             if cfg.post.get('keep_closest_vessels', False):
-                pred_thresh = keep_closest_vessels(
-                    pred_thresh.astype(int),
-                    num_vessels=cfg.post.num_closest_vessels
-                )
+                pred_thresh = keep_closest_vessels(pred_thresh.astype(int), cfg.post.num_closest_vessels)
 
+            # --- 保存 ---
             if save_predictions:
                 clean_name = image_path.name.replace('.img.nii.gz', '').replace('.nii.gz', '')
                 save_name = f"{clean_name}_{cfg.file_app}pred{save_ext}"
                 save_path = output_folder / save_name
                 save_writer.write_seg(pred_thresh.astype(np.uint8), save_path)
 
-            if mask is not None:
-                post_processed_tensor = torch.from_numpy(pred_thresh).float().to(device)
-                metrics = Evaluator().estimate_metrics(post_processed_tensor, mask, threshold=0.5)
+            # --- 计算指标 & 打印 (这是你需要的) ---
+            if mask_paths:
+                # 找到对应的 mask 路径
+                # 注意：因为切分了数据，image_paths 和 mask_paths 在这个进程里是一一对应的
+                # 但为了安全，我们用 image_reader_writer 再读一次，或者如果你传进来的 mask_paths 已经是切分好的列表
+                # 这里假设 mask_paths 是和 image_paths 对齐的切片列表
+                if mask_paths[idx] is not None:
+                    mask_data = image_reader_writer.read_images(mask_paths[idx])[0]
+                    mask_tensor = torch.tensor(mask_data).bool().to(device)
 
-                fname = image_path.name
-                # 单个样本日志也可以选择打印全部，这里为了简洁只保留了关键的两个
-                # 如果想看全部，可以将这里也改成遍历打印
-                logger.info("=" * 40)
-                logger.info(f"Dice of {fname}: {metrics['dice'].item():.4f}")
-                logger.info(f"clDice of {fname}: {metrics['cldice'].item():.4f}")
-                metrics_dict[fname] = metrics
+                    post_processed_tensor = torch.from_numpy(pred_thresh).float().to(device)
 
-    # --- 最终平均指标汇总 ---
-    if metrics_dict:
-        mean_metrics = calculate_mean_metrics(list(metrics_dict.values()), round_to=cfg.round_to)
+                    metrics = Evaluator().estimate_metrics(post_processed_tensor, mask_tensor, threshold=0.5)
+
+                    # 转换 metrics 为纯数值
+                    metrics_val = {k: v.item() if hasattr(v, 'item') else v for k, v in metrics.items()}
+                    local_metrics[image_path.name] = metrics_val
+
+                    # === 恢复打印逻辑 ===
+                    # 使用 tqdm.write 可以避免打断进度条显示
+                    msg = f"[GPU {gpu_id}] {image_path.name} | Dice: {metrics_val['dice']:.4f} | clDice: {metrics_val['cldice']:.4f}"
+                    iterator.write(msg)
+
+    # 存入结果
+    return_dict[rank] = local_metrics
+
+
+@hydra.main(config_path="../configs", config_name="tem_infer", version_base="1.3.2")
+def main(cfg):
+    # 1. 获取所有数据路径
+    all_image_paths, all_mask_paths = get_paths_nested(cfg)
+    total_samples = len(all_image_paths)
+
+    # 2. 获取可用 GPU 列表
+    if not cfg.get("gpus"):
+        logger.warning("未配置 gpus 列表，将尝试使用 cuda:0")
+        target_gpus = [0]
+    else:
+        target_gpus = list(cfg.gpus)
+
+    num_gpus = len(target_gpus)
+    logger.info(f"即将使用 {num_gpus} 个 GPU: {target_gpus}")
+
+    # 3. 数据分片
+    # 将文件列表切分成 num_gpus 份
+    chunk_size = math.ceil(total_samples / num_gpus)
+    chunks_img = [all_image_paths[i:i + chunk_size] for i in range(0, total_samples, chunk_size)]
+
+    if all_mask_paths:
+        chunks_mask = [all_mask_paths[i:i + chunk_size] for i in range(0, total_samples, chunk_size)]
+    else:
+        chunks_mask = [None] * len(chunks_img)
+
+    # 4. 启动多进程
+    manager = mp.Manager()
+    return_dict = manager.dict()
+    processes = []
+
+    logger.info(f"开始多 GPU 推理 (Total Samples: {total_samples})...")
+
+    for rank, gpu_id in enumerate(target_gpus):
+        if rank >= len(chunks_img):
+            break # 防止 GPU 数多于数据块数
+
+        p = mp.Process(
+            target=run_inference_worker,
+            args=(
+                rank,
+                gpu_id,
+                chunks_img[rank],
+                chunks_mask[rank],
+                cfg,
+                return_dict
+            )
+        )
+        p.start()
+        processes.append(p)
+
+    for p in processes:
+        p.join()
+
+    # 5. 汇总结果
+    logger.info("所有进程已完成，正在汇总指标...")
+
+    final_metrics_dict = {}
+    for rank, metrics in return_dict.items():
+        final_metrics_dict.update(metrics)
+
+    if final_metrics_dict:
+        mean_metrics = calculate_mean_metrics(list(final_metrics_dict.values()), round_to=cfg.round_to)
 
         logger.info("=" * 60)
-        logger.info(f"FINAL AVERAGE METRICS ({len(metrics_dict)} cases):")
+        logger.info(f"FINAL GLOBAL AVERAGE METRICS ({len(final_metrics_dict)} cases):")
         logger.info("=" * 60)
 
-        # 遍历所有指标并打印
-        # 对键进行排序，使输出整齐
         for key in sorted(mean_metrics.keys()):
             val = mean_metrics[key]
-            # 兼容 Tensor 和 普通数值
             val = val.item() if hasattr(val, 'item') else val
             logger.info(f"Mean {key:<25}: {val:.4f}")
-
         logger.info("=" * 60)
+    else:
+        logger.info("没有产生评估指标 (可能未提供标签或 mask_paths 为空)")
 
-    elif mask_paths:
-        logger.warning("未计算出任何指标，请检查数据或标签是否匹配。")
-
-    logger.info("Inference finished.")
-
+    logger.info("Global Inference finished.")
 
 if __name__ == "__main__":
     main()

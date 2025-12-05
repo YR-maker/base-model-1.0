@@ -63,7 +63,7 @@ def _log_test_summary(trainer, pl_module, dataset_name):
     logger.info("🎉 " + "=" * 60)
 
 
-@hydra.main(config_path="configs", config_name="tem_train", version_base="1.3.2")
+@hydra.main(config_path="../configs", config_name="tem_train", version_base="1.3.2")
 def main(cfg):
     """
     模型的微调主函数
@@ -180,7 +180,7 @@ def main(cfg):
 
     # 初始化数据加载器 - 关键部分对应论文中的实验设置
     # 训练数据集：使用UnionDataset并限制样本数量
-    train_dataset = UnionDataset(cfg.data, "train", finetune=True)
+    train_dataset = UnionDataset(cfg.data, "fine-tuning", finetune=True)
     train_dataset = Subset(train_dataset, range(cfg.num_shots))  # 限制样本数量
 
     # 使用随机采样器并进行重复采样，模拟论文中的少样本设置

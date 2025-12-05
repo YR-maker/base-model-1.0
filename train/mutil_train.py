@@ -2,7 +2,14 @@ import logging
 import sys
 import warnings
 import os
+from pathlib import Path
 
+# 获取当前脚本的绝对路径
+current_file_path = Path(__file__).resolve()
+# 获取项目根目录 (即 train 文件夹的上一级)
+project_root = current_file_path.parent.parent
+# 将项目根目录添加到 python 搜索路径中
+sys.path.append(str(project_root))
 # ==========================================
 # 【关键修复】MONAI 与 NumPy 版本兼容性修复
 # 必须放在 from utils.dataset import UnionDataset 之前
@@ -73,7 +80,7 @@ def _log_test_summary(trainer, pl_module, dataset_name):
     logger.info("🎉 " + "=" * 60)
 
 
-@hydra.main(config_path="configs", config_name="tem_train", version_base="1.3.2")
+@hydra.main(config_path="../configs", config_name="mutil_train", version_base="1.3.2")
 def main(cfg):
     """
     模型的微调主函数 (已适配多卡DDP训练)
@@ -98,7 +105,7 @@ def main(cfg):
     # Path(路径).name 会自动获取路径的最后一部分
     last_folder_name = os.path.basename(os.path.normpath(full_data_path))
 
-    run_name = f'{cfg.num_shots}shot_{last_folder_name}'
+    run_name = f'{cfg.loss_name}_{cfg.num_shots}shot_{last_folder_name}'
 
     # 强制设置为离线模式
     cfg.offline = True
@@ -180,7 +187,7 @@ def main(cfg):
 
     # 模型检查点回调 - 保存最佳模型
     checkpoint_callback = ModelCheckpoint(
-        dirpath=cfg.chkpt_folder + "/" + cfg.wandb_project + "/" + run_name,
+        dirpath=cfg.chkpt_folder + "/" + cfg.data_name + "/" + run_name,
         monitor=monitor_metric,
         save_top_k=1,
         mode="max",
@@ -227,7 +234,7 @@ def main(cfg):
     train_dataset = Subset(train_dataset, range(cfg.num_shots))
 
     # 计算每张卡需要跑的样本数，保持总 Epoch 规模不变 (约10000)
-    total_samples_per_epoch = int(1e4)
+    total_samples_per_epoch = int(1e5)
     samples_per_gpu = total_samples_per_epoch // num_devices
 
     if global_rank == 0:
