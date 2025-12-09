@@ -1,0 +1,72 @@
+defaults:
+  - hydra: default
+  - model: dyn_unet_base
+  - _self_
+
+# --- 输入输出路径 ---
+image_path: /home/yangrui/Project/Base-model/datasets/imageCAS/imageCAS-ROI-0/test
+output_folder: null
+
+
+
+# --- 文件名匹配规则 ---
+image_file_ending: .img.nii.gz
+mask_suffix: .label.nii.gz
+mask_path: "auto"
+file_app: "_dynamic"
+round_to: 4
+strict_matching: true
+
+# --- 硬件与模型 ---
+# 方式2: 使用多个设备 (新方式，优先级高)
+devices: [0, 1, 2, 3]  # 这里填写您想使用的 GPU ID 列表
+ckpt_path: /home/yangrui/Project/Base-model/local_results/checkpoints/imageCAS/Tversky_45shot_imageCAS-ROI-0/step:1900_val_DiceMetric:0.66.ckpt
+
+
+# --- 推理参数 ---
+batch_size: 8
+patch_size: [128, 128, 128]
+overlap: 0.5
+mode: "constant"
+sigma_scale: 0.125
+padding_mode: "constant"
+seed: 404
+
+# --- 后处理配置 ---
+post:
+  apply: true
+
+  # 1. 缝合参数 (Bridge Gaps)
+  # 形态学闭运算半径，用于连接断裂的血管
+  closing_radius: 4
+
+  # 2. 距离筛选 (Center Filtering)
+  # 注意：阈值 center_dist_threshold 已在代码中设为动态计算：
+  # Threshold = (Image_Z_Size - 8) / 2
+  # 这里的参数已被移除，由脚本自动控制。
+
+# 测试时增强
+tta:
+  scales: [1]
+  invert: false
+  invert_mean_thresh: 0.5
+  equalize_hist: false
+  hist_bins: 100
+
+# 预处理
+transforms_config:
+  - EnsureChannelFirst:
+      channel_dim: "no_channel"
+  - ScaleIntensityRangePercentiles:
+      lower: 1
+      upper: 99
+      b_min: 0
+      b_max: 1
+      clip: true
+  - ToTensor:
+      device: null
+
+# 结果融合
+merging:
+  threshold: 0.5
+  max: false

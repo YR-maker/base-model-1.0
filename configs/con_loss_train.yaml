@@ -1,0 +1,51 @@
+# 默认配置继承链
+defaults:
+  - fine-tuning
+  # 注意：这里使用普通的 imageCAS 数据配置即可，不需要 _topo 后缀的配置
+  - override data: MSD08
+  - _self_
+
+# 实验参数
+num_shots: 3
+lr: 0.00001
+devices: [0,1,2,3]
+devices_num: 4 # 你实际使用的卡数
+data_name: MSD08
+loss_name: con_loss
+
+path_to_chkpt: /home/yangrui/Project/Base-model/local_results/checkpoints/base.pt
+chkpt_folder: /home/yangrui/Project/Base-model/local_results/checkpoints
+
+dataloader:
+  shuffle: False
+
+trainer:
+  lightning_trainer:
+    val_check_interval: 100
+    max_steps: 2500
+    max_epochs: 1 # 稍微给多一点 epoch 保证步数跑满
+
+  # Lightning 模块配置
+  lightning_module:
+    # 【核心修改】指向我们新建的“仅损失函数”模块
+    _target_: utils.new.con_module.PLModuleConnectivityOnly
+    _partial_: True
+    prediction_threshold: 0.62
+    batch_size: ${batch_size}
+    input_size: ${input_size}
+
+    scheduler_configs:
+      cosine_annealing_few:
+        interval: step
+        frequency: 10
+        scheduler:
+          _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+          _partial_: True
+          T_max: 1000
+          eta_min: 0.0000001
+          last_epoch: -1
+      linear_warmup: null
+      cosine_annealing: null
+
+# 【重要】请删除或注释掉原本这里关于 loss: HybridVesselLoss 的配置
+# 我们希望它使用 configs/trainer/default.yaml 里定义的 DiceCELoss 作为基础

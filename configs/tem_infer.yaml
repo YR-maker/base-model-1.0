@@ -1,0 +1,73 @@
+defaults:
+  - hydra: default
+  - model: dyn_unet_base
+  - _self_
+
+
+# --- 多卡配置 (修改处) ---
+gpus: [4,5]
+
+# --- 输入输出路径配置 ---
+image_path: /home/yangrui/Project/Base-model/datasets/CAS2023/CAS2023-resize/test
+output_folder: /home/yangrui/Project/Base-model/local_results/output/CAS2023/0_shot_test
+
+# --- 文件名匹配规则 ---
+image_file_ending: .img.nii.gz
+mask_suffix: .label.nii.gz
+mask_path: "auto"
+
+file_app: ""
+round_to: 2
+strict_matching: true
+
+# --- 模型权重 ---
+ckpt_path: /home/yangrui/Project/Base-model/local_results/checkpoints/base.pt
+
+
+
+# --- 滑动窗口设置 ---
+batch_size: 8
+patch_size: [128, 128, 128]
+overlap: 0.5
+mode: "constant"
+sigma_scale: 0.125
+padding_mode: "constant"
+
+# 评估和可复现性配置
+seed: 404
+
+# 后处理配置
+post:
+  apply: false
+  small_objects_min_size: 100
+  small_objects_connectivity: 5
+  keep_largest_vessels: false
+  num_largest_vessels: 4
+  keep_closest_vessels: false
+  num_closest_vessels: 3
+
+# 测试时增强配置
+tta:
+  scales: [1]
+  invert: false
+  invert_mean_thresh: 0.5
+  equalize_hist: false
+  hist_bins: 100
+
+# 标准预处理变换管道
+transforms_config:
+  - EnsureChannelFirst:
+      channel_dim: "no_channel"
+  - ScaleIntensityRangePercentiles:
+      lower: 1
+      upper: 99
+      b_min: 0
+      b_max: 1
+      clip: true
+  - ToTensor:
+      device: null
+
+# 多尺度预测结果融合配置
+merging:
+  threshold: 0.5
+  max: false

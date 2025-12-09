@@ -1,0 +1,7 @@
+defaults:
+  - default_finetune@HiPas
+  - _self_
+
+HiPas:
+  sample_prop: 1
+  path: /home/yangrui/Project/Base-model/datasets/Hipas/hipas-ROI
