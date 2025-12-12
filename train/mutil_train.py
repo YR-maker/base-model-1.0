@@ -1,8 +1,10 @@
 import logging
 import sys
 import warnings
-import os
+import os  # 确保导入 os
+import numpy as np
 from pathlib import Path
+from monai.data import CacheDataset # 保留引用，虽然下面被自定义类替代，但保持兼容性
 
 # 获取当前脚本的绝对路径
 current_file_path = Path(__file__).resolve()
@@ -10,6 +12,8 @@ current_file_path = Path(__file__).resolve()
 project_root = current_file_path.parent.parent
 # 将项目根目录添加到 python 搜索路径中
 sys.path.append(str(project_root))
+
+
 # ==========================================
 # 【关键修复】MONAI 与 NumPy 版本兼容性修复
 # 必须放在 from utils.dataset import UnionDataset 之前
@@ -21,6 +25,7 @@ try:
 except ImportError:
     pass
 # ==========================================
+
 import hydra
 import torch
 import torch.utils
@@ -83,7 +88,7 @@ def _log_test_summary(trainer, pl_module, dataset_name):
 @hydra.main(config_path="../configs", config_name="mutil_train", version_base="1.3.2")
 def main(cfg):
     """
-    模型的微调主函数 (已适配多卡DDP训练)
+    模型的微调主函数 (已适配多卡DDP训练及动态步数调整)
     """
 
     # 设置随机种子确保实验可复现性
@@ -132,6 +137,33 @@ def main(cfg):
         version="version_0"
     )
 
+    # ---------------------------------------------------------
+    # 【核心修改 1】提前获取设备信息并计算动态步数
+    # ---------------------------------------------------------
+    # 确定使用的 GPU 列表和数量
+    target_devices = cfg.devices
+    num_devices = len(target_devices)
+
+    # 读取 yaml 中的 max_steps (10000) 作为“基准总计算量”
+    base_total_steps = cfg.trainer.lightning_trainer.max_steps
+
+    # 逻辑：GPU 越多，单卡步数越少，保持总 Batch 量级一致
+    # 4卡: 10000/4 = 2500 步; 2卡: 10000/2 = 5000 步
+    actual_max_steps = int(base_total_steps // num_devices)
+
+    # 逻辑：保持评估密度一致。总步数的 1/25 进行一次评估 (全程评估约25次)
+    # 4卡: 2500/25 = 100步; 2卡: 5000/25 = 200步
+    actual_val_interval = int(actual_max_steps // 25)
+
+    if global_rank == 0:
+        logger.info("=" * 40)
+        logger.info(f"🧮 动态训练策略调整 (GPU数量: {num_devices})")
+        logger.info("=" * 40)
+        logger.info(f"   - YAML基准步数: {base_total_steps}")
+        logger.info(f"   - 实际训练步数 (max_steps): {actual_max_steps}")
+        logger.info(f"   - 评估间隔 (val_check_interval): {actual_val_interval} steps")
+        logger.info("=" * 40)
+
     # 设置训练回调函数
     lr_monitor = LearningRateMonitor()
     monitor_metric = "val_DiceMetric"
@@ -176,13 +208,17 @@ def main(cfg):
 
             logger.info("=" * 60)
 
-    # 模型检查点回调
+    # ---------------------------------------------------------
+    # 【核心修改 2】权重命名中加入 GPU 数量
+    # ---------------------------------------------------------
+    # filename 格式示例: step=2499_val_DiceMetric=0.85_4GPUs.ckpt
     checkpoint_callback = ModelCheckpoint(
-        dirpath=cfg.chkpt_folder + "/" + cfg.data_name + "/" + run_name,
+        dirpath=cfg.chkpt_folder + "/" + cfg.data_name + "/" + last_folder_name + "/" + run_name,
         monitor=monitor_metric,
         save_top_k=1,
         mode="max",
-        filename="{step}_{" + monitor_metric + ":.2f}",
+        # 修改这里：在文件名末尾添加 _{num_devices}GPUs
+        filename="{step}_{" + monitor_metric + ":.2f}_" + f"{num_devices}GPUs",
         auto_insert_metric_name=True,
         save_last=True
     )
@@ -191,22 +227,20 @@ def main(cfg):
 
     validation_callback = ValidationResultCallback()
 
-    # ---------------------------------------------------------
-    # 【核心修改点】配置多卡训练参数
-    # ---------------------------------------------------------
-    # 确定使用的 GPU 列表和数量
-    target_devices = cfg.devices  # 例如: [4, 5]
-    num_devices = len(target_devices)
-
     # 实例化 Trainer
     trainer_cls = hydra.utils.instantiate(cfg.trainer.lightning_trainer)
 
-    # 覆盖参数以启用 DDP 多卡训练
+    # ---------------------------------------------------------
+    # 【核心修改 3】使用动态计算的参数覆盖配置
+    # ---------------------------------------------------------
     trainer_additional_kwargs = {
         "logger": [wnb_logger, csv_logger],
         "callbacks": [lr_monitor, checkpoint_callback, validation_callback],
 
-        # 将 devices 设置为列表，例如 [4, 5]，指定使用这些卡
+        # 动态覆盖 yaml 中的配置
+        "max_steps": actual_max_steps,
+        "val_check_interval": actual_val_interval,
+
         "devices": target_devices,
         "accelerator": "gpu",
         "strategy": "ddp",
@@ -216,12 +250,77 @@ def main(cfg):
 
     trainer = trainer_cls(**trainer_additional_kwargs)
 
-    # ---------------------------------------------------------
-    # 【数据采样器调整】使用 num_devices 适配多卡
-    # ---------------------------------------------------------
-    train_dataset = UnionDataset(cfg.data, "train", finetune=True)
-    train_dataset = Subset(train_dataset, range(cfg.num_shots))
 
+    # ---------------------------------------------------------
+    # 【数据采样器调整】适配 UnionDataset 格式 (核心修复部分)
+    # ---------------------------------------------------------
+
+    # 0. 定义一个内部 Dataset 类
+    # 作用：1. 存储在内存中的 List 数据; 2. 像 UnionDataset 一样返回 (Tuple) 而不是 (Dict)
+    class FewShotInMemoryDataset(torch.utils.data.Dataset):
+        def __init__(self, data_list, transform):
+            self.data = data_list
+            self.transform = transform
+
+        def __len__(self):
+            return len(self.data)
+
+        def __getitem__(self, idx):
+            item = self.data[idx]
+            # 1. 应用 Transforms (MONAI Transforms 输入 Dict，输出 Dict)
+            transformed = self.transform(item)
+
+            # 2. 【关键修复】强制解包为 Tuple，模拟 UnionDataset 的行为
+            # 必须返回 (Image, Mask) 的值，而不是 keys (字符串)
+            return transformed['Image'], transformed['Mask'] > 0
+
+    # 1. 实例化原始 Dataset 获取配置信息 (Reader, Transforms 等)
+    raw_train_dataset = UnionDataset(cfg.data, "train", finetune=True)
+
+    # 获取内部第一个数据集的信息
+    dataset_info = raw_train_dataset.datasets[0]
+    data_paths = dataset_info["paths"]
+    reader = dataset_info["reader"]
+    # 注意：UnionDataset 没有 .transform 属性，变换存储在 dataset_info 字典中
+    data_transform = dataset_info["transforms"]
+
+    subset_data_list = []
+
+    # 2. 手动预加载前 num_shots 个样本的数据 (Image & Mask)
+    # 必须在这里加载，因为 UnionDataset 的 transforms 期望输入是 Array 而不是 Path
+    shots_to_load = min(cfg.num_shots, len(data_paths))
+
+    if global_rank == 0:
+        logger.info(f"🚀 正在将 {shots_to_load} 个 Few-Shot 样本手动加载到内存缓存中...")
+
+    # 使用简单的循环读取数据
+    for i in range(shots_to_load):
+        sample_path = data_paths[i]
+
+        # 复用 dataset.py 中的文件查找逻辑
+        img_path = [p for p in sample_path.iterdir() if 'img' in p.name][0]
+        mask_path = [p for p in sample_path.iterdir() if 'label' in p.name][0]
+
+        # 复用 dataset.py 中的读取逻辑 (读取为 Numpy Array)
+        img = reader.read_images(str(img_path))[0].astype(np.float32)
+        mask = reader.read_images(str(mask_path))[0].astype(bool)
+
+        # 构建符合 Transforms 预期的字典 (Keys 必须匹配 dataset.py 中的定义)
+        subset_data_list.append({'Image': img, 'Mask': mask})
+
+    if global_rank == 0:
+        logger.info(f"✅ 成功加载 {len(subset_data_list)} 个样本到内存")
+
+    # 3. 使用自定义的 Dataset 替代 CacheDataset
+    # 这确保了 __getitem__ 返回的是 tuple(tensor, tensor) 而不是 dict
+    train_dataset = FewShotInMemoryDataset(
+        data_list=subset_data_list,
+        transform=data_transform
+    )
+
+    # ---------------------------------------------------------
+    # 采样器配置
+    # ---------------------------------------------------------
     # 计算每张卡需要跑的样本数，保持总 Epoch 规模不变
     total_samples_per_epoch = int(1e5)
     samples_per_gpu = total_samples_per_epoch // num_devices
@@ -328,3 +427,5 @@ if __name__ == "__main__":
     os.environ["WANDB_MODE"] = "offline"
 
     main()
+
+

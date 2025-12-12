@@ -1,6 +1,6 @@
 # 默认配置继承链
 defaults:
-  - fine-tuning
+  - train
   # 注意：这里使用普通的 imageCAS 数据配置即可，不需要 _topo 后缀的配置
   - override data: MSD08
   - _self_
@@ -8,7 +8,7 @@ defaults:
 # 实验参数
 num_shots: 3
 lr: 0.00001
-devices: [0,1,2,3]
+devices: [0,1,6,7]
 devices_num: 4 # 你实际使用的卡数
 data_name: MSD08
 loss_name: con_loss
@@ -21,8 +21,8 @@ dataloader:
 
 trainer:
   lightning_trainer:
-    val_check_interval: 100
-    max_steps: 2500
+    val_check_interval: 200
+    max_steps: 5000
     max_epochs: 1 # 稍微给多一点 epoch 保证步数跑满
 
   # Lightning 模块配置

@@ -5,11 +5,18 @@ defaults:
 
 
 # --- 多卡配置 (修改处) ---
-gpus: [4,5]
+gpus: [2,3,6,7]
 
 # --- 输入输出路径配置 ---
-image_path: /home/yangrui/Project/Base-model/datasets/CAS2023/CAS2023-resize/test
-output_folder: /home/yangrui/Project/Base-model/local_results/output/CAS2023/0_shot_test
+image_path: auto
+output_folder: auto
+shot_name:
+# --- 模型权重 ---
+ckpt_path: /home/yangrui/Project/Base-model/local_results/checkpoints/CAS2023/CAS2023-reshape/base_loss_1shot_CAS2023-reshape/step:2200_val_DiceMetric:0.81_4GPUs.ckpt
+
+
+
+
 
 # --- 文件名匹配规则 ---
 image_file_ending: .img.nii.gz
@@ -20,13 +27,8 @@ file_app: ""
 round_to: 2
 strict_matching: true
 
-# --- 模型权重 ---
-ckpt_path: /home/yangrui/Project/Base-model/local_results/checkpoints/base.pt
-
-
-
 # --- 滑动窗口设置 ---
-batch_size: 8
+batch_size: 4
 patch_size: [128, 128, 128]
 overlap: 0.5
 mode: "constant"
