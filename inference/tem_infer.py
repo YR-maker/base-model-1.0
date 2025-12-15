@@ -151,7 +151,7 @@ def load_model(cfg, device):
         state_dict = ckpt['state_dict']
         new_state_dict = {}
         for key, value in state_dict.items():
-            key = key.replace('model.', '').replace('models.', '').replace('net.', '').replace('module.', '')
+            key = key.replace('model.', '').replace('models.', '').replace('net.', '').replace('model.', '')
             new_state_dict[key] = value
         state_dict_to_load = new_state_dict
     elif isinstance(ckpt, dict) and any(key.startswith(('encoder', 'decoder', 'backbone')) for key in ckpt.keys()):

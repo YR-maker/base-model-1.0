@@ -178,13 +178,13 @@ class BatchNiftiCropper:
 def main():
     # 配置路径
     INPUT_BASE_DIR = "/home/yangrui/Project/Base-model/datasets/imageCAS/ImageCAS-original/all/1-200"
-    OUTPUT_BASE_DIR = "/home/yangrui/Project/Base-model/datasets/imageCAS/imageCAS-clip-0/1-60"
+    OUTPUT_BASE_DIR = "/home/yangrui/Project/Base-model/datasets/imageCAS/imageCAS-clip-0/all"
 
     # 创建裁剪器实例
     cropper = BatchNiftiCropper(margin=(0, 0, 0))  # 可根据需要调整边缘大小
 
     # 方法1: 处理所有病例
-    cropper.process_batch(INPUT_BASE_DIR, OUTPUT_BASE_DIR, 1, 60)
+    cropper.process_batch(INPUT_BASE_DIR, OUTPUT_BASE_DIR, 53, 54)
 
 
 

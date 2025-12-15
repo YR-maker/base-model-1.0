@@ -1,0 +1,2 @@
+这是基线版本，此版本包含con_loss,Tversky_loss,base_loss三种损失函数，
+模型结构并未修改，测试了imageCAS，MSD08，CAS2023三个数据集。

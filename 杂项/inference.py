@@ -54,7 +54,7 @@ def load_model(cfg, device):
                 new_key = key[6:]
             elif key.startswith('net.'):
                 new_key = key[4:]
-            elif key.startswith('module.'):
+            elif key.startswith('model.'):
                 new_key = key[7:]
             else:
                 new_key = key
