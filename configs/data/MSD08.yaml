@@ -15,9 +15,18 @@ MSD8:
           keys: ["Image", "Mask"]
           source_key: "Mask"
           crop_foreground: True
-      - CenterSpatialCropd:
+#      - CenterSpatialCropd:
+#          keys: ["Image", "Mask"]
+#          roi_size: ${input_size}
+      # =======================================================
+      # 【修改点】将 CenterSpatialCropd 替换为 RandSpatialCropd
+      # =======================================================
+      - RandSpatialCropd:
           keys: ["Image", "Mask"]
           roi_size: ${input_size}
+          random_center: True    # 开启随机中心点
+          random_size: False     # 固定裁剪尺寸为 input_size (如128)，不改变大小
+      # =======================================================
       - ScaleIntensityd:
           keys: ["Image"]
           minv: 0
@@ -57,9 +66,7 @@ MSD8:
           keys: ["Image"]
           prob: 0.2
           intensity_range: [0.0, 0.5]
-      - CenterSpatialCropd:
-          keys: ["Image", "Mask"]
-          roi_size: ${input_size}
+
       - ToTensord:
           keys: ["Image", "Mask"]
     val:

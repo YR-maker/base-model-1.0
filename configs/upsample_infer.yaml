@@ -3,17 +3,21 @@ defaults:
   - model: dyn_unet_base
   - _self_
 
+# --- 核心修改：指定推理时的目标尺寸 ---
+# 格式: [Depth(Z), Height(Y), Width(X)]
+# 你的需求：z轴翻倍(150->300), XY(640). 这里我们直接指定目标绝对尺寸
+# 无论输入是 640x640x150 还是 300x300x150，都会被拉伸到这个尺寸进行推理
+inference_target_shape: [300, 640, 640]
 
 # --- 多卡配置 (修改处) ---
-gpus: [1,7]
+gpus: [0,1,2,3,7]
 
 # --- 输入输出路径配置 ---
 image_path: auto
 output_folder: auto
 shot_name:
 # --- 模型权重 ---
-ckpt_path: /home/yangrui/Project/Base-model/local_results/checkpoints/MSD08/MSD-All-Final/base_loss_3shot_MSD-All-Final/step:3000_val_DiceMetric:0.67_2GPUs.ckpt
-
+ckpt_path: /home/yangrui/Project/Base-model/local_results/checkpoints/CAS2023/CAS2023-reshape/base_loss_3shot_CAS2023-reshape/step:1600_val_DiceMetric:0.85_4GPUs.ckpt
 
 # --- 文件名匹配规则 ---
 image_file_ending: .img.nii.gz

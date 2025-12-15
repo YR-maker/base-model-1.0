@@ -19,8 +19,8 @@ strict_matching: true
 
 # --- 硬件与模型 ---
 # 方式2: 使用多个设备 (新方式，优先级高)
-devices: [0, 1, 2, 3]  # 这里填写您想使用的 GPU ID 列表
-ckpt_path: /home/yangrui/Project/Base-model/local_results/checkpoints/imageCAS/Tversky_45shot_imageCAS-ROI-0/step:1900_val_DiceMetric:0.66.ckpt
+devices: [0,1]  # 这里填写您想使用的 GPU ID 列表
+ckpt_path: /home/yangrui/Project/Base-model/local_results/checkpoints/imageCAS/imageCAS-clip-0/con_loss_3shot_imageCAS-clip-0/step:2200_val_DiceMetric:0.68.ckpt
 
 
 # --- 推理参数 ---

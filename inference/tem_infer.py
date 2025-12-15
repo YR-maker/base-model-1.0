@@ -1,12 +1,19 @@
 """
-多GPU模型推理脚本
-功能: 自动将数据集切分到多个GPU上并行推理，最后汇总指标。
+多GPU模型推理脚本 (支持 clDice 打印与记录)
+功能:
+1. 自动切分数据到多卡并行推理。
+2. 汇总结果并在控制台打印 (新增 clDice 显示)。
+3. 生成标准化的 CSV 实验报告，包含配置元数据、单例得分及最终平均分。
+4. 报告统一保存在脚本运行目录下的 local_results/tem_infer/{dataset_name} 文件夹中。
 """
 import logging
 import warnings
 from pathlib import Path
 import math
 import os
+import csv
+import sys
+from datetime import datetime
 
 import torch
 import torch.nn.functional as F
@@ -17,6 +24,7 @@ from tqdm import tqdm
 from monai.inferers import SlidingWindowInfererAdapt
 from skimage.morphology import remove_small_objects
 from skimage.measure import label, regionprops
+from omegaconf import OmegaConf
 
 # 保持原有的引用不变
 from utils.dataset import generate_transforms
@@ -33,6 +41,98 @@ except RuntimeError:
 logger = logging.getLogger(__name__)
 
 
+def save_csv_report(final_metrics_dict, mean_metrics, cfg, dataset_name):
+    """
+    【核心修改】生成标准化的实验报告 CSV
+    保存位置: {原始运行目录}/local_results/tem_infer/{dataset_name}/
+    命名格式: tem_infer_{数据集}_{时间}.csv
+    内容结构: 配置信息 -> 详细数据 -> 平均指标
+    """
+    # 1. 确定保存路径
+    try:
+        project_root = Path(hydra.utils.get_original_cwd())
+    except:
+        project_root = Path.cwd()
+
+    csv_dir = project_root / "local_results" / "tem_infer" / dataset_name
+    csv_dir.mkdir(parents=True, exist_ok=True)
+
+    # 2. 生成文件名
+    timestamp = datetime.now().strftime("%Y%m%d")
+    d_name = dataset_name if dataset_name else "UnknownData"
+    filename = f"tem_infer_{d_name}_{timestamp}_{cfg.shot_name}shot.csv"
+    save_path = csv_dir / filename
+
+    # 3. 准备数据
+    sorted_keys = sorted(final_metrics_dict.keys())
+    metric_names = []
+    if sorted_keys:
+        # 获取第一个样本的所有指标名称 (例如: ['dice', 'cldice', 'iou'])
+        metric_names = list(final_metrics_dict[sorted_keys[0]].keys())
+        # 尝试将 dice 和 cldice 排在前面，方便查看
+        priority_keys = ['dice', 'cldice', 'clDice', 'iou']
+        metric_names.sort(key=lambda x: (priority_keys.index(x) if x in priority_keys else 999, x))
+
+    try:
+        with open(save_path, mode='w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+
+            # --- Part 1: 实验配置元数据 (Metadata) ---
+            writer.writerow(["### Experiment Configuration Record ###"])
+            writer.writerow(["Script Name", "tem_infer.py"])
+            writer.writerow(["Date", timestamp])
+            writer.writerow(["Dataset Name", d_name])
+            writer.writerow(["Model Checkpoint", cfg.ckpt_path])
+            writer.writerow(["Input Data Path", cfg.image_path])
+            writer.writerow(["Output Mask Path", cfg.output_folder])
+            writer.writerow(["TTA Scales", str(cfg.tta.scales)])
+            writer.writerow(["TTA Invert", f"{cfg.tta.invert} (Thresh: {cfg.tta.invert_mean_thresh})"])
+            writer.writerow(["Patch / Batch", f"{cfg.patch_size} / {cfg.batch_size}"])
+            writer.writerow(["Merging Strategy", f"Max: {cfg.merging.max}, Thresh: {cfg.merging.threshold}"])
+
+            post_str = f"SmallObj:{cfg.post.small_objects_min_size}" if cfg.post.apply else "None"
+            if cfg.post.get('keep_largest_vessels'): post_str += f", KeepLargest:{cfg.post.num_largest_vessels}"
+            writer.writerow(["Post Processing", post_str])
+
+            writer.writerow([]) # 空行分隔
+
+            # --- Part 2: 详细得分 (Detailed Scores) ---
+            writer.writerow(["### Detailed Metrics per Case ###"])
+            if sorted_keys:
+                # 表头
+                headers = ["Case Name"] + metric_names
+                writer.writerow(headers)
+
+                # 数据行
+                for name in sorted_keys:
+                    row = [name] + [final_metrics_dict[name].get(k, "") for k in metric_names]
+                    writer.writerow(row)
+            else:
+                writer.writerow(["No metrics calculated (Missing masks?)"])
+
+            writer.writerow([]) # 空行分隔
+
+            # --- Part 3: 平均指标大集合 (Aggregated Metrics) ---
+            writer.writerow(["### Final Aggregated Metrics ###"])
+            if mean_metrics:
+                # 写入两行：一行是指标名，一行是平均值
+                # 按照 metric_names 的顺序写入平均值
+                sorted_mean_keys = [k for k in metric_names if k in mean_metrics]
+                # 加上原本在 mean_metrics 但不在 metric_names 里的其他键
+                for k in mean_metrics.keys():
+                    if k not in sorted_mean_keys:
+                        sorted_mean_keys.append(k)
+
+                writer.writerow(["Metric"] + sorted_mean_keys)
+                writer.writerow(["Average"] + [mean_metrics.get(k, 0) for k in sorted_mean_keys])
+
+        logger.info(f"✅ 实验报告已保存至: {save_path}")
+        logger.info(f"   (包含了实验配置、{len(sorted_keys)}个样本的详细得分以及最终平均值)")
+
+    except Exception as e:
+        logger.error(f"❌ 保存 CSV 报告失败: {e}")
+
+
 def load_model(cfg, device):
     """加载模型权重"""
     ckpt_path = Path(cfg.ckpt_path)
@@ -40,7 +140,6 @@ def load_model(cfg, device):
         raise FileNotFoundError(f"模型文件不存在: {ckpt_path}")
 
     try:
-        # map_location 确保加载到正确的 GPU
         ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
     except Exception as e:
         raise RuntimeError(f"加载模型失败: {e}")
@@ -52,7 +151,7 @@ def load_model(cfg, device):
         state_dict = ckpt['state_dict']
         new_state_dict = {}
         for key, value in state_dict.items():
-            key = key.replace('model.', '').replace('models.', '').replace('net.', '').replace('module.', '')
+            key = key.replace('model.', '').replace('models.', '').replace('net.', '').replace('model.', '')
             new_state_dict[key] = value
         state_dict_to_load = new_state_dict
     elif isinstance(ckpt, dict) and any(key.startswith(('encoder', 'decoder', 'backbone')) for key in ckpt.keys()):
@@ -207,7 +306,6 @@ def run_inference_worker(rank, gpu_id, image_paths, mask_paths, cfg, return_dict
 
     # 进度条
     desc = f"GPU {gpu_id}"
-    # 使用 position 让进度条不重叠，rank 0 在最上面
     iterator = tqdm(enumerate(image_paths), total=len(image_paths), desc=desc, position=rank, leave=True)
 
     with torch.no_grad():
@@ -269,12 +367,8 @@ def run_inference_worker(rank, gpu_id, image_paths, mask_paths, cfg, return_dict
                 save_path = output_folder / save_name
                 save_writer.write_seg(pred_thresh.astype(np.uint8), save_path)
 
-            # --- 计算指标 & 打印 (这是你需要的) ---
+            # --- 计算指标 ---
             if mask_paths:
-                # 找到对应的 mask 路径
-                # 注意：因为切分了数据，image_paths 和 mask_paths 在这个进程里是一一对应的
-                # 但为了安全，我们用 image_reader_writer 再读一次，或者如果你传进来的 mask_paths 已经是切分好的列表
-                # 这里假设 mask_paths 是和 image_paths 对齐的切片列表
                 if mask_paths[idx] is not None:
                     mask_data = image_reader_writer.read_images(mask_paths[idx])[0]
                     mask_tensor = torch.tensor(mask_data).bool().to(device)
@@ -283,24 +377,117 @@ def run_inference_worker(rank, gpu_id, image_paths, mask_paths, cfg, return_dict
 
                     metrics = Evaluator().estimate_metrics(post_processed_tensor, mask_tensor, threshold=0.5)
 
-                    # 转换 metrics 为纯数值
                     metrics_val = {k: v.item() if hasattr(v, 'item') else v for k, v in metrics.items()}
                     local_metrics[image_path.name] = metrics_val
 
-                    # === 恢复打印逻辑 ===
-                    # 使用 tqdm.write 可以避免打断进度条显示
-                    msg = f"[GPU {gpu_id}] {image_path.name} | Dice: {metrics_val['dice']:.4f} | clDice: {metrics_val['cldice']:.4f}"
+                    # 【修改点】新增打印 clDice
+                    # 优先获取 cldice 或 clDice，如果都没有则为 0
+                    dice_val = metrics_val.get('dice', 0)
+                    cldice_val = metrics_val.get('cldice', metrics_val.get('clDice', 0))
+
+                    msg = f"[GPU {gpu_id}] {image_path.name} | Dice: {dice_val:.4f} | clDice: {cldice_val:.4f}"
                     iterator.write(msg)
 
     # 存入结果
     return_dict[rank] = local_metrics
 
 
+import re
+from pathlib import Path
+
+
+def auto_infer_paths(cfg):
+    """
+    自动路径推导逻辑：
+    1. 如果 image_path 或 output_folder 是 "auto" 或 None，则根据 ckpt_path 推导。
+    2. 如果是具体路径，则保留原值，不修改。
+    """
+    # 获取当前配置的值 (转为字符串并小写，防止写成 "Auto")
+    raw_img_path = str(cfg.get("image_path", "auto")).strip()
+    raw_out_path = str(cfg.get("output_folder", "auto")).strip()
+
+    # 判断是否需要自动推导
+    need_infer_img = raw_img_path.lower() in ["auto", "none", "null"]
+    need_infer_out = raw_out_path.lower() in ["auto", "none", "null"]
+
+    # 如果两个都指定了具体路径，直接返回，不浪费时间解析
+    if not need_infer_img and not need_infer_out:
+        return cfg
+
+    # --- 开始解析 ckpt_path ---
+    ckpt_path = Path(cfg.ckpt_path)
+    parts = ckpt_path.parts
+
+    try:
+        # 1. 定位 "checkpoints" 文件夹的位置
+        ckpt_idx = parts.index("checkpoints")
+    except ValueError:
+        logger.warning("⚠️ 无法自动推导路径：权重路径中未包含 'checkpoints' 文件夹。将维持原始配置。")
+        return cfg
+
+    # 2. 推导 Project Root (local_results 的上一级)
+    # parts[:ckpt_idx] 是 .../local_results/
+    # parts[:ckpt_idx-1] 是 .../Project/Base-model/
+    project_root = Path(*parts[:ckpt_idx - 1])
+
+    # 3. 提取数据集名称 (checkpoints 和 run_folder 之间的部分)
+    # 结构: .../checkpoints/{数据集}/{子数据集}/{运行文件夹}/{权重文件}
+    # parts[-2] 是运行文件夹 (例如 base_loss_3shot_...)
+    run_folder_name = parts[-2]
+    dataset_rel_parts = parts[ckpt_idx + 1: -2]
+    dataset_rel_path = Path(*dataset_rel_parts)
+
+    # 4. 提取 Shot 数 (用于输出文件夹命名)
+    match = re.search(r'(\d+)shot', run_folder_name)
+    shot_num = match.group(1) if match else "0"
+
+    # --- 执行赋值 ---
+
+    # (A) 自动推导 image_path
+    if need_infer_img:
+        # 规则: 项目根目录/datasets/{数据集路径}/test
+        autogen_image_path = project_root / "datasets" / dataset_rel_path / "test"
+        cfg.image_path = str(autogen_image_path)
+        logger.info(f"⚡ [Auto] Image Path 推导为: {cfg.image_path}")
+    else:
+        logger.info(f"📍 [Manual] Image Path 使用指定路径: {cfg.image_path}")
+
+    # (B) 自动推导 output_folder
+    if need_infer_out:
+        # 规则: 项目根目录/local_results/output/{数据集路径}/{shot}_shot_test
+        autogen_output_folder = project_root / "local_results" / "output" / dataset_rel_path / f"{shot_num}_shot_test"
+        cfg.output_folder = str(autogen_output_folder)
+        logger.info(f"⚡ [Auto] Output Folder 推导为: {cfg.output_folder}")
+    else:
+        logger.info(f"📍 [Manual] Output Folder 使用指定路径: {cfg.output_folder}")
+
+    cfg.shot_name= shot_num
+
+    return cfg
+
+
+
 @hydra.main(config_path="../configs", config_name="tem_infer", version_base="1.3.2")
 def main(cfg):
+
+    # 【第一步】调用自动推导函数
+    cfg = auto_infer_paths(cfg)
+
     # 1. 获取所有数据路径
     all_image_paths, all_mask_paths = get_paths_nested(cfg)
     total_samples = len(all_image_paths)
+
+    # 提取数据集名称（用于CSV命名）
+    try:
+        dataset_name = Path(cfg.image_path).parent.name
+    except:
+        dataset_name = "Dataset"
+
+    logger.info("=" * 80)
+    logger.info(f"🚀 开始推理任务 (Dataset: {dataset_name})")
+    logger.info(f"📂 权重路径: {cfg.ckpt_path}")
+    logger.info(f"📂 保存CSV至: ./local_results/tem_infer/{dataset_name}")
+    logger.info("=" * 80)
 
     # 2. 获取可用 GPU 列表
     if not cfg.get("gpus"):
@@ -310,10 +497,8 @@ def main(cfg):
         target_gpus = list(cfg.gpus)
 
     num_gpus = len(target_gpus)
-    logger.info(f"即将使用 {num_gpus} 个 GPU: {target_gpus}")
 
     # 3. 数据分片
-    # 将文件列表切分成 num_gpus 份
     chunk_size = math.ceil(total_samples / num_gpus)
     chunks_img = [all_image_paths[i:i + chunk_size] for i in range(0, total_samples, chunk_size)]
 
@@ -327,11 +512,9 @@ def main(cfg):
     return_dict = manager.dict()
     processes = []
 
-    logger.info(f"开始多 GPU 推理 (Total Samples: {total_samples})...")
-
     for rank, gpu_id in enumerate(target_gpus):
         if rank >= len(chunks_img):
-            break # 防止 GPU 数多于数据块数
+            break
 
         p = mp.Process(
             target=run_inference_worker,
@@ -350,7 +533,7 @@ def main(cfg):
     for p in processes:
         p.join()
 
-    # 5. 汇总结果
+    # 5. 汇总结果与记录
     logger.info("所有进程已完成，正在汇总指标...")
 
     final_metrics_dict = {}
@@ -358,17 +541,23 @@ def main(cfg):
         final_metrics_dict.update(metrics)
 
     if final_metrics_dict:
+        # 计算总体平均
         mean_metrics = calculate_mean_metrics(list(final_metrics_dict.values()), round_to=cfg.round_to)
 
+        # 打印控制台简报
         logger.info("=" * 60)
-        logger.info(f"FINAL GLOBAL AVERAGE METRICS ({len(final_metrics_dict)} cases):")
+        logger.info(f"🏁 FINAL GLOBAL AVERAGE METRICS ({len(final_metrics_dict)} cases):")
         logger.info("=" * 60)
-
+        # 打印所有平均指标
         for key in sorted(mean_metrics.keys()):
             val = mean_metrics[key]
             val = val.item() if hasattr(val, 'item') else val
             logger.info(f"Mean {key:<25}: {val:.4f}")
         logger.info("=" * 60)
+
+        # 保存增强版 CSV 报告 (自动包含 cldice)
+        save_csv_report(final_metrics_dict, mean_metrics, cfg, dataset_name)
+
     else:
         logger.info("没有产生评估指标 (可能未提供标签或 mask_paths 为空)")
 

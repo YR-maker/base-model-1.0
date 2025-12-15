@@ -1,22 +1,20 @@
 # 默认配置继承链
 defaults:
   - train
-  # 【核心修改 1】使用标准的 imageCAS 数据配置 (不带 _topo 后缀)
-  # 这样数据增强流程里就没有 RandTopoMaskd，完全纯净
-  - override data: MSD08
+  # 使用纯净数据配置 (无 TopoMask 遮罩)
+  - override data: imageCAS
   - _self_
 
 # 实验参数
 num_shots: 3
 lr: 0.00001
-# 请根据你的实际显卡情况修改，之前你是 [0,1,2,3,4,5,6,7]
-devices: [0,1,2,3]
-run_name: con_loss # 实验名称
+devices: [2,3,6,7]
+devices_num: 8
+run_name: TC_loss
 
-data_name: MSD08
-loss_name: con_loss
+data_name: imageCAS
+loss_name: tversky+cldice
 
-# 路径配置：你可以指向 base.pt，也可以指向你第一轮微调后的权重
 path_to_chkpt: /home/yangrui/Project/Base-model/local_results/checkpoints/base.pt
 chkpt_folder: /home/yangrui/Project/Base-model/local_results/checkpoints
 
@@ -27,17 +25,17 @@ trainer:
   lightning_trainer:
     val_check_interval: 200
     max_steps: 10000
-    max_epochs: 10 # 稍微多给点 epoch 保证步数跑满
+    max_epochs: 10
 
-  # Lightning 模块配置
+  # Lightning 模块配置 (直接使用标准微调模块)
   lightning_module:
-    # 【核心修改 2】指向刚才修正的 con_module
-    _target_: utils.MarkVSC.con_module.PLModuleConnectivityOnly
+    _target_: model.module.PLModuleFinetune
     _partial_: True
     prediction_threshold: 0.62
     batch_size: ${batch_size}
     input_size: ${input_size}
 
+    # 学习率调度器
     scheduler_configs:
       cosine_annealing_few:
         interval: step
@@ -50,3 +48,16 @@ trainer:
           last_epoch: -1
       linear_warmup: null
       cosine_annealing: null
+
+  # 【核心修改】将 Loss 替换为我们新写的 HybridVesselLoss
+  # 这会被注入到 PLModuleFinetune 的 self.loss 中
+  loss:
+    _target_: utils.orther_loss.losses.HybridVesselLoss
+    # Tversky 参数：beta > alpha 强迫模型提高 Recall，减少断裂
+    alpha: 0.3
+    beta: 0.7
+    # clDice 参数
+    iter_: 3
+    # 权重分配：Tversky 为主，clDice 为辅
+    lambda_main: 1.0
+    lambda_cldice: 0.4

@@ -11,7 +11,7 @@ lightning_trainer:
   log_every_n_steps: 10
 
 lightning_module:
-  _target_: utils.module.PLModule
+  _target_: utils.model.PLModule
   _partial_: True
   prediction_threshold: 0.5
 

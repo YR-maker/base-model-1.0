@@ -1,9 +1,11 @@
 import logging
 import torch
 # 继承原来的微调模块
-from utils.module import PLModuleFinetune as BasePLModuleFinetune
-# 引入刚才定义的损失函数
-from utils.new.con_loss import ConnectivityLoss3D
+from model.module import PLModuleFinetune as BasePLModuleFinetune
+
+# 【修改这里】从 MarkVSC 文件夹导入损失函数
+# 原代码: from utils.new.con_loss import ConnectivityLoss3D
+from utils.MarkVSC.con_loss import ConnectivityLoss3D
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +42,7 @@ class PLModuleConnectivityOnly(BasePLModuleFinetune):
         # 5. 记录日志 (Rank 0)
         if self.rank == 0:
             self.log("train_base_loss", base_loss)
-            self.log("train_con_loss", con_loss)  # 重点关注这个指标下降
+            self.log("train_con_loss", con_loss)
             self.log("train_loss", total_loss)
 
         return total_loss

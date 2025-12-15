@@ -187,7 +187,7 @@ def main(cfg):
 
     # 模型检查点回调 - 保存最佳模型
     checkpoint_callback = ModelCheckpoint(
-        dirpath=cfg.chkpt_folder + "/" + cfg.data_name + "/" + run_name,
+        dirpath=cfg.chkpt_folder + "/" + cfg.data_name + "/" + last_folder_name + "/" + run_name,
         monitor=monitor_metric,
         save_top_k=1,
         mode="max",

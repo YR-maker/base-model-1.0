@@ -190,7 +190,7 @@ def main(cfg):
 
     # 模型检查点回调 - 保存最佳模型
     checkpoint_callback = ModelCheckpoint(
-        dirpath=cfg.chkpt_folder + "/" + cfg.data_name + "/" + run_name,
+        dirpath=cfg.chkpt_folder + "/" + cfg.data_name + "/" + last_folder_name + "/" + run_name,
         monitor=monitor_metric,
         save_top_k=1,
         mode="max",
@@ -233,11 +233,11 @@ def main(cfg):
     # ---------------------------------------------------------
     # 【修改点】调整数据采样器以适配多卡
     # ---------------------------------------------------------
-    train_dataset = UnionDataset(cfg.data, "fine-tuning", finetune=True)
+    train_dataset = UnionDataset(cfg.data, "train", finetune=True)
     train_dataset = Subset(train_dataset, range(cfg.num_shots))
 
     # 计算每张卡需要跑的样本数，保持总 Epoch 规模不变 (约10000)
-    total_samples_per_epoch = int(4e4)
+    total_samples_per_epoch = int(1e5)
     samples_per_gpu = total_samples_per_epoch // num_devices
 
     if global_rank == 0:

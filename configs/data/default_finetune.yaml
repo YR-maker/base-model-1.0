@@ -27,10 +27,20 @@ transforms:
         keys: ["Image", "Mask"]      # 同时处理图像和对应的分割掩码
         channel_dim: "no_channel"   # 原始数据无通道维度，自动添加通道维度[C,H,W,D]
 
-    # 2. 中心裁剪：统一输入尺寸
-    - CenterSpatialCropd:
-        keys: ["Image", "Mask"]
-        roi_size: ${input_size}     # 从中心裁剪到指定尺寸，保持重要解剖结构
+#    # 2. 中心裁剪：统一输入尺寸
+#    - CenterSpatialCropd:
+#        keys: [ "Image", "Mask" ]
+#        roi_size: ${input_size}     # 从中心裁剪到指定尺寸，保持重要解剖结构
+#        # 开启中心裁剪随机裁剪
+#        random_center: true         # 开启随机中心
+#        random_size: false          # 固定尺寸裁剪，不随机改变大小
+
+      # 2. 改为随机空间裁剪
+    - RandSpatialCropd: # <--- 修改为这个类名
+        keys: [ "Image", "Mask" ]
+        roi_size: ${input_size}
+        random_center: true
+        random_size: false
 
     # 3. 强度归一化：标准化像素值范围
     - ScaleIntensityd:
