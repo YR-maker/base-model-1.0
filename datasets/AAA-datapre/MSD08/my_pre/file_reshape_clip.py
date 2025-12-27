@@ -13,7 +13,7 @@ SRC_IMG_DIR = Path("/home/yangrui/Project/Base-model/datasets/MSD08/msd_task8/im
 SRC_LABEL_DIR = Path("/home/yangrui/Project/Base-model/datasets/MSD08/msd_task8/reannotated_fixed")
 
 # 2. 输出路径
-DST_ROOT_DIR = Path("/home/yangrui/Project/Base-model/datasets/MSD08/MSD-clip/all")
+DST_ROOT_DIR = Path("/home/yangrui/Project/Base-model/datasets/MSD08/MSD-61-clip/all")
 
 # 3. 裁剪参数
 MARGIN = 0
@@ -22,15 +22,60 @@ MARGIN = 0
 SRC_IMG_PATTERN = "hepaticvessel_*.nii.gz"
 SRC_LABEL_PREFIX = "hp"
 
+# 5. ⚡ 新增：厚度筛选开关
+THICKNESS_FILTER_SWITCH = True  # True: 开启厚度筛选，False: 关闭厚度筛选
+MAX_THICKNESS_MM = 2.0  # 最大厚度阈值（毫米）
+
 
 # =================================================================
 
 def extract_id(filename):
+    """提取文件名中的ID数字"""
     match = re.search(r'(\d+)', filename)
     return match.group(1) if match else None
 
 
+def get_image_thickness_mm(image):
+    """获取图像的层厚（单位：毫米）[3](@ref)"""
+    try:
+        # 获取图像间距信息（通常以毫米为单位）
+        spacing = image.GetSpacing()
+        # 对于3D图像，层厚通常是z轴的间距
+        thickness = spacing[2]
+        return thickness
+    except Exception as e:
+        print(f"   ⚠️ 无法获取图像层厚: {e}")
+        return None
+
+
+def filter_by_thickness(img_path, max_thickness_mm):
+    """根据厚度筛选图像[3](@ref)"""
+    if not THICKNESS_FILTER_SWITCH:
+        # 如果开关关闭，直接返回True（不进行筛选）
+        return True
+
+    try:
+        image = sitk.ReadImage(str(img_path))
+        thickness = get_image_thickness_mm(image)
+
+        if thickness is None:
+            print(f"   ⚠️ 无法读取层厚信息，跳过筛选")
+            return True
+
+        if thickness <= max_thickness_mm:
+            print(f"   📏 层厚: {thickness:.2f}mm ≤ {max_thickness_mm}mm → 符合条件")
+            return True
+        else:
+            print(f"   📏 层厚: {thickness:.2f}mm > {max_thickness_mm}mm → 跳过")
+            return False
+
+    except Exception as e:
+        print(f"   ❌ 厚度筛选错误: {e}")
+        return True  # 出错时默认不筛选
+
+
 def crop_and_save_force_rename(img_path, label_path, final_img_path, final_label_path, margin=0):
+    """裁剪并保存图像和标签"""
     print(f"   ⚡ 正在读取并裁剪...")
     try:
         image = sitk.ReadImage(str(img_path))
@@ -100,24 +145,30 @@ def crop_and_save_force_rename(img_path, label_path, final_img_path, final_label
 
 
 def main():
+    """主函数"""
     if not SRC_IMG_DIR.exists() or not SRC_LABEL_DIR.exists():
         print(f"❌ 错误：源目录不存在！")
         return
 
+    # 显示当前开关状态[1](@ref)
+    filter_status = "开启" if THICKNESS_FILTER_SWITCH else "关闭"
+    print(f"🔧 厚度筛选开关状态: {filter_status}")
+    if THICKNESS_FILTER_SWITCH:
+        print(f"📏 厚度阈值: ≤{MAX_THICKNESS_MM}mm")
+    print("-" * 60)
+
     img_files = sorted(list(SRC_IMG_DIR.glob(SRC_IMG_PATTERN)))
     total_files = len(img_files)
-    print(f"🔍 扫描到 {total_files} 个文件，开始基于原始ID处理...")
+    print(f"🔍 扫描到 {total_files} 个文件，开始处理...")
     print(f"📂 输出目录: {DST_ROOT_DIR}")
-    print("-" * 50)
+    print("-" * 60)
 
     success_count = 0
     fail_count = 0
+    skipped_by_thickness = 0
 
-    # 【修改点 1】 不再使用 enumerate 生成的 index，只作为计数器显示进度
     for i, img_path in enumerate(img_files, start=1):
         original_name = img_path.name
-
-        # 提取 ID 字符串 (例如 "007")
         case_id_str = extract_id(original_name)
 
         if not case_id_str:
@@ -125,15 +176,11 @@ def main():
             print(f"[{i}/{total_files}] ❌ 无法从文件名提取 ID: {original_name}")
             continue
 
-        # 【修改点 2】 将 "007" 转换为整数 7，再转回字符串 "7"
-        # 这样文件夹就会是 "7" 而不是 "007"
         real_id = str(int(case_id_str))
-
-        expected_label_name = f"{SRC_LABEL_PREFIX}{case_id_str}.nii.gz"  # 注意：源标签文件名通常还是带前导零的(hp007)，如果源标签是hp7，这里也需要改
+        expected_label_name = f"{SRC_LABEL_PREFIX}{case_id_str}.nii.gz"
         label_path = SRC_LABEL_DIR / expected_label_name
 
         if not label_path.exists():
-            # 尝试一下不带前导零的匹配，以防万一
             label_path_alt = SRC_LABEL_DIR / f"{SRC_LABEL_PREFIX}{real_id}.nii.gz"
             if label_path_alt.exists():
                 label_path = label_path_alt
@@ -142,11 +189,15 @@ def main():
                 fail_count += 1
                 continue
 
-        # 【修改点 3】 使用 real_id ("7") 创建文件夹和文件名
+        # ⚡ 新增：厚度筛选逻辑[1](@ref)
+        if not filter_by_thickness(img_path, MAX_THICKNESS_MM):
+            skipped_by_thickness += 1
+            print(f"[{i}/{total_files}] ⏭️ 跳过：厚度不符合条件 (ID: {real_id})")
+            continue
+
         target_folder = DST_ROOT_DIR / real_id
         target_folder.mkdir(parents=True, exist_ok=True)
 
-        # 最终目标文件名： 7.img.nii.gz
         target_img_path = target_folder / f"{real_id}.img.nii.gz"
         target_label_path = target_folder / f"{real_id}.label.nii.gz"
 
@@ -157,9 +208,14 @@ def main():
         else:
             fail_count += 1
 
-    print("-" * 50)
+    print("-" * 60)
     print(f"🎉 处理完成！")
-    print(f"✅ 成功: {success_count}")
+    print(f"🔧 厚度筛选: {filter_status}")
+    if THICKNESS_FILTER_SWITCH:
+        print(f"📏 厚度阈值: ≤{MAX_THICKNESS_MM}mm")
+    print(f"✅ 成功处理: {success_count} 个文件")
+    print(f"⏭️ 因厚度跳过: {skipped_by_thickness} 个文件")
+    print(f"❌ 处理失败: {fail_count} 个文件")
     print(f"📂 结果路径: {DST_ROOT_DIR}")
 
 

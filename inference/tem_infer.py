@@ -58,7 +58,7 @@ def save_csv_report(final_metrics_dict, mean_metrics, cfg, dataset_name):
     csv_dir.mkdir(parents=True, exist_ok=True)
 
     # 2. 生成文件名
-    timestamp = datetime.now().strftime("%Y%m%d")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
     d_name = dataset_name if dataset_name else "UnknownData"
     filename = f"tem_infer_{d_name}_{timestamp}_{cfg.shot_name}shot.csv"
     save_path = csv_dir / filename
@@ -467,8 +467,14 @@ def auto_infer_paths(cfg):
 
 
 
-@hydra.main(config_path="../configs", config_name="tem_infer", version_base="1.3.2")
+@hydra.main(config_path="../configs", config_name="inference/tem_infer", version_base="1.3.2")
 def main(cfg):
+    # --- 添加这两行调试代码 ---
+    print("\n" + "=" * 30)
+    print("DEBUG: Loaded Config Keys:", cfg.keys())
+    print("DEBUG: Image Path:", cfg.get("image_path", "NOT FOUND"))
+    print("=" * 30 + "\n")
+    # -----------------------
 
     # 【第一步】调用自动推导函数
     cfg = auto_infer_paths(cfg)

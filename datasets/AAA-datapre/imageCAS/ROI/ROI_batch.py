@@ -5,35 +5,27 @@ import numpy as np
 import nibabel as nib
 from skimage import morphology, measure
 from scipy import ndimage
-from concurrent.futures import ProcessPoolExecutor  # 引入多进程加速
+from concurrent.futures import ProcessPoolExecutor
 
 # ================= 配置区域 =================
-# 输入数据的根目录
 SRC_ROOT = "/home/yangrui/Project/Base-model/datasets/imageCAS/imageCAS-clip-0"
-
-# 输出数据的根目录 (自动创建)
 DST_ROOT = "/home/yangrui/Project/Base-model/datasets/imageCAS/imageCAS-ROI-0"
+SUBSETS = ["test"]
 
-# 需要处理的子集文件夹
-SUBSETS = ["900-999",'1-60']
-
-# 你的成功参数
 PARAM_THRESH = -300
 PARAM_ERODE = 12
 PARAM_DILATE = 20
-
-# 是否复制 Label 文件 (建议开启，这样新数据集是完整的)
 COPY_LABELS = True
 
 
 # ===========================================
 
-def extract_heart_advanced(input_path, output_path,
+def extract_heart_advanced(input_path, output_path, label_path=None,
                            threshold_hu=-300,
                            erosion_radius=12,
                            dilation_radius=20):
     """
-    核心处理算法 (基于你验证通过的逻辑)
+    带标签无损检验的核心处理算法
     """
     try:
         # 1. 读取数据
@@ -52,9 +44,7 @@ def extract_heart_advanced(input_path, output_path,
         # 4. 提取最大连通域
         labeled_mask, num_features = ndimage.label(eroded_mask)
         if num_features == 0:
-            print(f"[Warning] {os.path.basename(input_path)}: 腐蚀后无残留，跳过处理，直接复制原图。")
-            shutil.copy(input_path, output_path)  # 保底措施
-            return
+            return "Fail_Erosion"
 
         region_sizes = [(i, np.sum(labeled_mask == i)) for i in range(1, num_features + 1)]
         region_sizes.sort(key=lambda x: x[1], reverse=True)
@@ -69,83 +59,82 @@ def extract_heart_advanced(input_path, output_path,
         final_mask = np.logical_and(binary_mask, safety_zone)
         final_mask = morphology.binary_closing(final_mask, morphology.ball(2))
 
-        # 7. 应用遮罩 (-1024)
+        # === 7. 【新增：标签无损检验模块】 ===
+        check_msg = ""
+        if label_path and os.path.exists(label_path):
+            lab_data = nib.load(label_path).get_fdata()
+            vessel_voxels = (lab_data > 0)
+            vessel_count = np.sum(vessel_voxels)
+
+            if vessel_count > 0:
+                # 计算在 final_mask 内的标签体素
+                preserved_vessel = np.logical_and(vessel_voxels, final_mask)
+                preserved_count = np.sum(preserved_vessel)
+
+                loss_count = vessel_count - preserved_count
+                preservation_rate = (preserved_count / vessel_count) * 100
+
+                if loss_count > 0:
+                    check_msg = f" | [警告] 标签受损! 丢失:{loss_count}体素({preservation_rate:.2f}%)"
+                else:
+                    check_msg = " | [安全] 标签100%保留"
+        # =====================================
+
+        # 8. 应用遮罩 (-1024)
         masked_data = data.copy()
         masked_data[~final_mask] = -1024
 
-        # 8. 保存
+        # 9. 保存
         new_img = nib.Nifti1Image(masked_data, affine, header)
         nib.save(new_img, output_path)
-        return True
+        return f"Success{check_msg}"
 
     except Exception as e:
-        print(f"[Error] 处理 {input_path} 失败: {e}")
-        return False
+        return f"Error: {str(e)}"
 
 
 def process_single_case(args):
-    """
-    单个病例的处理逻辑 (用于多进程调用)
-    """
     case_path, dst_subset_dir, subset_name = args
+    case_name = os.path.basename(case_path)
 
-    case_name = os.path.basename(case_path)  # e.g., "1"
-
-    # 构建源文件路径
     img_name = f"{case_name}.img.nii.gz"
     label_name = f"{case_name}.label.nii.gz"
 
     src_img_path = os.path.join(case_path, img_name)
     src_label_path = os.path.join(case_path, label_name)
 
-    # 构建目标文件夹路径
     dst_case_dir = os.path.join(dst_subset_dir, case_name)
     os.makedirs(dst_case_dir, exist_ok=True)
 
     dst_img_path = os.path.join(dst_case_dir, img_name)
     dst_label_path = os.path.join(dst_case_dir, label_name)
 
-    # 1. 处理图像
+    # 处理图像并传入标签路径进行检验
     if os.path.exists(src_img_path):
-        # 检查是否已经存在，如果存在跳过 (方便断点续传)
         if not os.path.exists(dst_img_path):
-            print(f"处理: {subset_name}/{case_name} ...")
-            extract_heart_advanced(src_img_path, dst_img_path,
-                                   threshold_hu=PARAM_THRESH,
-                                   erosion_radius=PARAM_ERODE,
-                                   dilation_radius=PARAM_DILATE)
+            status = extract_heart_advanced(src_img_path, dst_img_path,
+                                            label_path=src_label_path,
+                                            threshold_hu=PARAM_THRESH,
+                                            erosion_radius=PARAM_ERODE,
+                                            dilation_radius=PARAM_DILATE)
+            print(f"进度: {subset_name}/{case_name} -> {status}")
         else:
-            print(f"跳过 (已存在): {subset_name}/{case_name}")
-    else:
-        print(f"[Missing] 找不到图像: {src_img_path}")
+            print(f"跳过: {subset_name}/{case_name} (已存在)")
 
-    # 2. 复制标签 (如果开启)
     if COPY_LABELS and os.path.exists(src_label_path):
         if not os.path.exists(dst_label_path):
             shutil.copy(src_label_path, dst_label_path)
 
 
 def main():
-    print("=== 开始批量心脏ROI提取 ===")
-    print(f"源目录: {SRC_ROOT}")
-    print(f"目标目录: {DST_ROOT}")
-    print(f"参数: Thresh={PARAM_THRESH}, Erode={PARAM_ERODE}, Dilate={PARAM_DILATE}")
-
+    print("=== 开始批量心脏ROI提取 (含标签无损验证) ===")
     tasks = []
-
-    # 遍历目录结构收集任务
     for subset in SUBSETS:
         src_subset_path = os.path.join(SRC_ROOT, subset)
         dst_subset_path = os.path.join(DST_ROOT, subset)
+        if not os.path.exists(src_subset_path): continue
 
-        if not os.path.exists(src_subset_path):
-            print(f"警告: 目录不存在 {src_subset_path}")
-            continue
-
-        # 获取该子集下的所有病例文件夹 (数字命名的文件夹)
         case_folders = [f for f in os.listdir(src_subset_path) if os.path.isdir(os.path.join(src_subset_path, f))]
-
-        # 按数字排序，看起来舒服点
         try:
             case_folders.sort(key=lambda x: int(x))
         except:
@@ -155,21 +144,13 @@ def main():
             case_path = os.path.join(src_subset_path, case_name)
             tasks.append((case_path, dst_subset_path, subset))
 
-    print(f"\n共发现 {len(tasks)} 个病例，准备开始处理...")
-
-    # 使用多进程并行处理 (根据CPU核数自动调度)，极大加快速度
-    # 如果不想用多进程，可以把 max_workers 设为 1
     start_global = time.time()
-
-    # max_workers 可以根据你的CPU核数调整，通常设为 4-8 比较合适
     with ProcessPoolExecutor(max_workers=4) as executor:
         executor.map(process_single_case, tasks)
 
     print("\n" + "=" * 30)
-    print(f"全部完成！总耗时: {time.time() - start_global:.2f} 秒")
-    print(f"新数据集位置: {DST_ROOT}")
+    print(f"处理完成！总耗时: {time.time() - start_global:.2f} 秒")
 
 
 if __name__ == "__main__":
     main()
-

@@ -184,7 +184,7 @@ def main():
     cropper = BatchNiftiCropper(margin=(0, 0, 0))  # 可根据需要调整边缘大小
 
     # 方法1: 处理所有病例
-    cropper.process_batch(INPUT_BASE_DIR, OUTPUT_BASE_DIR, 53, 54)
+    cropper.process_batch(INPUT_BASE_DIR, OUTPUT_BASE_DIR, 1, 2)
 
 
 

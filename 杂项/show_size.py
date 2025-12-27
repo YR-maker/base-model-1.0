@@ -3,7 +3,8 @@ from pathlib import Path
 
 # ================= 配置区域 =================
 # 你的数据根目录
-ROOT_DIR = Path("/home/yangrui/Project/Base-model/datasets/MSD08/MSD-All-Final/test")
+ROOT_DIR = Path(
+    "/home/yangrui/Project/Base-model/datasets/CAS2023/CAS2023-resize/val")
 
 # Z轴切片数的阈值
 Z_AXIS_THRESHOLD = 300

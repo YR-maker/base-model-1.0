@@ -1,9 +1,9 @@
-# 默认配置继承链
+# @package _global_
 defaults:
-  - train
+  - /train
   # 【核心修改 1】使用标准的 imageCAS 数据配置 (不带 _topo 后缀)
   # 这样数据增强流程里就没有 RandTopoMaskd，完全纯净
-  - override data: MSD08
+  - override /data: MSD08
   - _self_
 
 # 实验参数

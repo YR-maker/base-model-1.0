@@ -1,26 +1,21 @@
 import os
 import glob
 import SimpleITK as sitk
+import numpy as np
 
 # ================= 核心配置 =================
-INPUT_DIR = "/home/yangrui/Project/Base-model/datasets/CAS2023/CAS2023-reshape/val"
-OUTPUT_DIR = "/home/yangrui/Project/Base-model/datasets/CAS2023/CAS2023-reshape/val-resize"
+INPUT_DIR = "/home/yangrui/Project/Base-model/datasets/CAS2023/CAS2023-reshape/all"
+OUTPUT_DIR = "/home/yangrui/Project/Base-model/datasets/CAS2023/CAS2023-resize/all"
 
-# Z轴放大倍数
-Z_FACTOR = 2.0
+# 目标尺寸 (格式: Depth/Z, Height/Y, Width/X)
+TARGET_SHAPE_ZYX = (300, 640, 640)
 
 
 # ================= 辅助函数 =================
 
 def save_nifti_safe(image_obj, final_path):
-    """
-    安全保存函数：先存为临时文件，再重命名。
-    解决 SimpleITK 对特殊文件名的报错问题。
-    """
     dirname = os.path.dirname(final_path)
     filename = os.path.basename(final_path)
-
-    # 临时文件名 TEMP_xxxx.nii.gz
     temp_filename = "TEMP_" + filename.replace(".", "_") + ".nii.gz"
     temp_path = os.path.join(dirname, temp_filename)
 
@@ -29,7 +24,6 @@ def save_nifti_safe(image_obj, final_path):
         writer.SetFileName(temp_path)
         writer.SetImageIO("NiftiImageIO")
         writer.Execute(image_obj)
-
         if os.path.exists(final_path):
             os.remove(final_path)
         os.rename(temp_path, final_path)
@@ -39,25 +33,43 @@ def save_nifti_safe(image_obj, final_path):
             os.remove(temp_path)
 
 
-def upsample_z_axis(itk_img, factor):
+def resize_to_fixed_size(itk_img, target_zyx, is_label=False):
     """
-    仅对 Z 轴进行重采样
+    将图像重采样到固定的 (Z, Y, X) 尺寸。
+    参数:
+        is_label: 如果是 True，强制使用最近邻插值；如果是 False，使用 B-Spline 插值。
     """
-    orig_size = itk_img.GetSize()
-    orig_spacing = itk_img.GetSpacing()
+    # SimpleITK 内部尺寸顺序是 (X, Y, Z)
+    target_size_sitk = [int(target_zyx[2]), int(target_zyx[1]), int(target_zyx[0])]
+
+    orig_size = itk_img.GetSize()  # (X, Y, Z)
+    orig_spacing = itk_img.GetSpacing()  # (X, Y, Z)
     orig_origin = itk_img.GetOrigin()
     orig_direction = itk_img.GetDirection()
 
-    # 新尺寸：Z * factor
-    new_size = [orig_size[0], orig_size[1], int(orig_size[2] * factor)]
-    # 新间距：Z / factor
-    new_spacing = [orig_spacing[0], orig_spacing[1], orig_spacing[2] / factor]
+    # 计算新的 Spacing 以保持物理体积一致
+    new_spacing = [
+        orig_spacing[0] * (orig_size[0] / target_size_sitk[0]),
+        orig_spacing[1] * (orig_size[1] / target_size_sitk[1]),
+        orig_spacing[2] * (orig_size[2] / target_size_sitk[2])
+    ]
 
     resampler = sitk.ResampleImageFilter()
     resampler.SetOutputSpacing(new_spacing)
-    resampler.SetSize(new_size)
+    resampler.SetSize(target_size_sitk)
     resampler.SetOutputOrigin(orig_origin)
     resampler.SetOutputDirection(orig_direction)
+
+    # ================= 核心修改点 =================
+    if is_label:
+        # 标签：必须是最近邻，保证整数类别不变 (0, 1, 2...)
+        resampler.SetInterpolator(sitk.sitkNearestNeighbor)
+    else:
+        # 图像：使用 B-Spline (3阶)，比 Linear 更平滑，质量更高
+        # 注意：B-Spline 计算量比 Linear 大，速度会稍慢一点，但质量最好
+        resampler.SetInterpolator(sitk.sitkBSpline)
+        # 如果觉得 B-Spline 太慢，也可以试 sitk.sitkBlackmanWindowedSinc (更锐利)
+    # ============================================
 
     return resampler
 
@@ -71,10 +83,9 @@ def main():
 
     print(f"Source Root: {INPUT_DIR}")
     print(f"Target Root: {OUTPUT_DIR}")
-    print(f"Z-Axis Scale Factor: {Z_FACTOR}")
+    print(f"Target Shape (Z, Y, X): {TARGET_SHAPE_ZYX}")
+    print("Interpolation: Image -> B-Spline (Smooth), Label -> NearestNeighbor")
 
-    # 1. 获取所有子文件夹 (例如: 001, 002, 003...)
-    # 过滤掉非文件夹的杂项文件
     case_folders = sorted([
         d for d in os.listdir(INPUT_DIR)
         if os.path.isdir(os.path.join(INPUT_DIR, d))
@@ -86,14 +97,10 @@ def main():
         case_in_dir = os.path.join(INPUT_DIR, case_id)
         case_out_dir = os.path.join(OUTPUT_DIR, case_id)
 
-        # 2. 在输出目录创建对应的子文件夹
         os.makedirs(case_out_dir, exist_ok=True)
-
-        # 3. 查找该子文件夹下的所有 .nii.gz 文件
         nii_files = sorted(glob.glob(os.path.join(case_in_dir, "*.nii.gz")))
 
         if not nii_files:
-            print(f"   [Skip] No .nii.gz files in folder: {case_id}")
             continue
 
         print(f"\n>>> Processing Folder: {case_id} ({len(nii_files)} files)")
@@ -102,29 +109,22 @@ def main():
             filename = os.path.basename(file_path)
             target_path = os.path.join(case_out_dir, filename)
 
-            # 判断是否为标签 (Label)
+            # 自动识别是否为标签
             fname_lower = filename.lower()
             is_label = ("label" in fname_lower) or ("seg" in fname_lower) or ("mask" in fname_lower)
 
             try:
-                # 读取
                 img_obj = sitk.ReadImage(file_path)
 
-                # 设置重采样器
-                resampler = upsample_z_axis(img_obj, Z_FACTOR)
+                # 传入 is_label 参数，决定插值方式
+                resampler = resize_to_fixed_size(img_obj, TARGET_SHAPE_ZYX, is_label=is_label)
 
-                # 插值策略选择
-                if is_label:
-                    resampler.SetInterpolator(sitk.sitkNearestNeighbor)  # 标签用最近邻
-                else:
-                    resampler.SetInterpolator(sitk.sitkLinear)  # 图像用线性
-
-                # 执行
                 new_img_obj = resampler.Execute(img_obj)
 
-                # 保存
                 save_nifti_safe(new_img_obj, target_path)
-                print(f"      Processed: {filename} ({'Label' if is_label else 'Image'})")
+
+                method_str = "NearestNeighbor" if is_label else "B-Spline"
+                print(f"      [{method_str}] Processed: {filename}")
 
             except Exception as e:
                 print(f"      [Error] Failed: {filename} -> {e}")

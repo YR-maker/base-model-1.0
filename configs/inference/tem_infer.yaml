@@ -1,18 +1,21 @@
+# @package _global_
 defaults:
-  - hydra: default
-  - model: dyn_unet_base
+  - /hydra: default
+  - /model: dyn_unet_base
   - _self_
 
 
 # --- 多卡配置 (修改处) ---
-gpus: [1,7]
+gpus: [0,1,2,3,5,6,7]
 
 # --- 输入输出路径配置 ---
-image_path: auto
-output_folder: auto
+image_path: /home/yangrui/Project/Base-model/datasets/imageCAS/imageCAS-ROI-300/test
+output_folder: /home/yangrui/Project/Base-model/local_results/output/imageCAS/imageCAS-ROI-300/0_shot_test
 shot_name:
+
+
 # --- 模型权重 ---
-ckpt_path: /home/yangrui/Project/Base-model/local_results/checkpoints/MSD08/MSD-All-Final/base_loss_3shot_MSD-All-Final/step:3000_val_DiceMetric:0.67_2GPUs.ckpt
+ckpt_path:  /home/yangrui/Project/Base-model/local_results/checkpoints/base.pt
 
 
 # --- 文件名匹配规则 ---
@@ -25,7 +28,7 @@ round_to: 2
 strict_matching: true
 
 # --- 滑动窗口设置 ---
-batch_size: 4
+batch_size: 1
 patch_size: [128, 128, 128]
 overlap: 0.5
 mode: "constant"
@@ -37,8 +40,8 @@ seed: 404
 
 # 后处理配置
 post:
-  apply: false
-  small_objects_min_size: 100
+  apply: true
+  small_objects_min_size: 200
   small_objects_connectivity: 5
   keep_largest_vessels: false
   num_largest_vessels: 4

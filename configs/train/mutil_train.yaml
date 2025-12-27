@@ -1,22 +1,24 @@
-# 默认配置继承链
+# @package _global_
 # 使用 Hydra 的默认值机制，按顺序加载 train.yaml 和 eval_smile.yaml 中的配置
 defaults:
-  - train
-  - override data: MSD08  # 添加 override 关键字
+  - /train
+  - override /data: imageCAS  # 添加 override 关键字
   - _self_         # 当前文件的配置拥有最高优先级
+
+seed: 42
 
 # 实验参数配置
 num_shots: 3       # 零样本模式：直接使用预训练模型进行推理，不进行微调
 lr: 0.00001         # 学习率设置（10^-5），适用于零样本评估的优化器初始化
-devices: [1,7]       # 使用单个 GPU（设备索引 0）进行计算
+devices: [1,5]       # 使用单个 GPU（设备索引 0）进行计算
 
-data_name:  MSD08   # 实验运行名称，用于日志记录和模型保存路径标识
-loss_name:  base_loss
+data_name:  imageCAS   # 实验运行名称，用于日志记录和模型保存路径标识
+loss_name:  Test
 
 # 路径配置（需要用户修改）
 path_to_chkpt: /home/yangrui/Project/Base-model/local_results/checkpoints/base.pt
-chkpt_folder: /home/yangrui/Project/Base-model/local_results/checkpoints
 
+chkpt_folder: /home/yangrui/Project/Base-model/local_results/checkpoints
 
 # 数据加载器配置
 dataloader:
@@ -24,8 +26,8 @@ dataloader:
 # 训练器配置（对应 PyTorch Lightning Trainer）
 trainer:
   lightning_trainer:
-    val_check_interval: 200  # 每训练 200 步进行一次验证集评估
-    max_steps: 10000          # 最大训练步数（零样本模式下主要用于控制评估频率）
+    val_check_interval: 400  # 每训练 200 步进行一次验证集评估
+    max_steps: 100          # 最大训练步数（零样本模式下主要用于控制评估频率）
     max_epochs: 1            # 最大训练轮数（设置为 1 确保快速完成评估流程）
 
   # Lightning 模块配置（专门用于微调/评估的模块）

@@ -12,7 +12,7 @@ SRC_IMG_DIR = "/home/yangrui/Project/Base-model/datasets/MSD08/msd_task8/imagesT
 SRC_LABEL_DIR = "/home/yangrui/Project/Base-model/datasets/MSD08/msd_task8/reannotated_fixed"
 
 # 2. 输出路径
-OUTPUT_DIR = "/home/yangrui/Project/Base-model/datasets/MSD08/MSD-All-Final/test"
+OUTPUT_DIR = "/home/yangrui/Project/Base-model/datasets/MSD08/MSD-ada/test"
 
 # 3. 判定标准与参数
 THICKNESS_THRESHOLD = 2.1  # 大于等于此值则认为是厚层

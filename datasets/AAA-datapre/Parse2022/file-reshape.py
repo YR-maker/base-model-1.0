@@ -4,96 +4,92 @@ import nibabel as nib
 import numpy as np
 from tqdm import tqdm
 
+# ================= 1. 深度配置 =================
+CONFIG = {
+    # 原始数据根目录 (包含 PA000XXX 文件夹)
+    "source_root": "/home/yangrui/Project/Base-model/datasets/Parse/Parse-origin/train",
+    # 目标裁剪目录
+    "target_root": "/home/yangrui/Project/Base-model/datasets/Parse/Parse-reshape/all",
 
-def process_dataset():
-    # ==== 配置路径 ====
-    # 原始数据根目录
-    source_root = "/home/yangrui/Project/Base-model/datasets/Parse/Parse-origin"
+}
 
-    # 新的目标目录 (建议新建一个，不要覆盖原有的)
-    target_root = "/home/yangrui/Project/Base-model/datasets/Parse/Parse-formatted"
 
-    # 需要处理的三个划分
-    splits = ["fine-tuning", "val", "test"]
-    # ================
+# ================= 2. 修改后的核心函数 =================
 
-    if not os.path.exists(target_root):
-        os.makedirs(target_root)
-        print(f"创建目标根目录: {target_root}")
+def copy_without_cropping(img_src, lab_src, case_dst_dir, pid):
+    """直接复制文件而不进行裁剪处理"""
+    try:
+        # 目标文件名: 5.img.nii.gz / 5.label.nii.gz
+        final_img_name = f"{pid}.img.nii.gz"
+        final_lab_name = f"{pid}.label.nii.gz"
 
-    for split in splits:
-        src_split_path = os.path.join(source_root, split)
-        dst_split_path = os.path.join(target_root, split)
+        final_img_path = os.path.join(case_dst_dir, final_img_name)
+        final_lab_path = os.path.join(case_dst_dir, final_lab_name)
 
-        if not os.path.exists(src_split_path):
-            print(f"跳过: 找不到源文件夹 {src_split_path}")
+        # 直接复制文件而不是裁剪和重新保存
+        shutil.copy2(img_src, final_img_path)
+        shutil.copy2(lab_src, final_lab_path)
+
+        return True
+    except Exception as e:
+        print(f"❌ 文件复制失败: {e}")
+        return False
+
+
+# ================= 3. 执行主逻辑 =================
+
+def main():
+    src_root = CONFIG["source_root"]
+    dst_root = CONFIG["target_root"]
+
+    if not os.path.exists(dst_root):
+        os.makedirs(dst_root)
+
+    # 获取所有病例文件夹
+    all_files = os.listdir(src_root)
+    patient_folders = sorted([f for f in all_files if os.path.isdir(os.path.join(src_root, f))])
+
+    print(f"🚀 开始重建文件结构，检测到 {len(patient_folders)} 个病例...")
+    print("📝 模式: 仅重建文件结构，不进行数据裁剪")
+
+    success_count = 0
+    skip_count = 0
+
+    for folder in tqdm(patient_folders):
+        # 1. 解析 ID (PA000005 -> 5)
+        try:
+            pid_int = int(folder.replace("PA", ""))
+            pid = str(pid_int)
+        except:
+            pid = folder
+
+        # 2. 源文件路径
+        img_src = os.path.join(src_root, folder, "image", f"{folder}.nii.gz")
+        lab_src = os.path.join(src_root, folder, "label", f"{folder}.nii.gz")
+
+        # 检查源文件是否存在
+        if not os.path.exists(img_src) or not os.path.exists(lab_src):
+            print(f"⚠️  病例 {pid} 源文件不存在，跳过")
+            skip_count += 1
             continue
 
-        # 获取该 split 下的所有病人文件夹 (如 PA000005)
-        patient_folders = [f for f in os.listdir(src_split_path) if os.path.isdir(os.path.join(src_split_path, f))]
+        # 3. 创建目标目录 (parse-clip/5/)
+        case_dst_dir = os.path.join(dst_root, pid)
+        os.makedirs(case_dst_dir, exist_ok=True)
 
-        print(f"正在处理 {split} 集，共 {len(patient_folders)} 个病例...")
+        # 4. 直接复制文件而不进行裁剪
+        if copy_without_cropping(img_src, lab_src, case_dst_dir, pid):
+            success_count += 1
+        else:
+            skip_count += 1
 
-        for patient_folder in tqdm(patient_folders):
-            # 1. 解析 ID: PA000005 -> 5
-            try:
-                # 去掉 'PA' 并转为 int 去掉前导零，再转回 str
-                # 例如: PA000005 -> 5 -> "5"
-                patient_id_raw = patient_folder.replace("PA", "")
-                patient_id = str(int(patient_id_raw))
-            except ValueError:
-                print(f"警告: 无法解析文件夹名 {patient_folder}，将直接使用原名")
-                patient_id = patient_folder
-
-            # 2. 创建目标文件夹: .../test/5
-            target_patient_dir = os.path.join(dst_split_path, patient_id)
-            if not os.path.exists(target_patient_dir):
-                os.makedirs(target_patient_dir)
-
-            # 源文件路径
-            src_img_path = os.path.join(src_split_path, patient_folder, "image.nii.gz")
-            src_lbl_path = os.path.join(src_split_path, patient_folder, "label.nii")
-
-            # 有时候 label 可能是 .nii.gz，做个兼容检查
-            if not os.path.exists(src_lbl_path):
-                src_lbl_path_gz = os.path.join(src_split_path, patient_folder, "label.nii.gz")
-                if os.path.exists(src_lbl_path_gz):
-                    src_lbl_path = src_lbl_path_gz
-
-            # 目标文件路径
-            # image.nii.gz -> 5.img.nii.gz
-            dst_img_name = f"{patient_id}.img.nii.gz"
-            dst_img_path = os.path.join(target_patient_dir, dst_img_name)
-
-            # label.nii -> 5.label.nii.gz
-            dst_lbl_name = f"{patient_id}.label.nii.gz"
-            dst_lbl_path = os.path.join(target_patient_dir, dst_lbl_name)
-
-            # 3. 处理 Image (直接复制，因为都是 .nii.gz)
-            if os.path.exists(src_img_path):
-                shutil.copy2(src_img_path, dst_img_path)
-            else:
-                print(f"缺失: {patient_folder} 中没有 image.nii.gz")
-
-            # 4. 处理 Label (可能需要格式转换 .nii -> .nii.gz)
-            if os.path.exists(src_lbl_path):
-                # 如果源文件已经是 .nii.gz，直接复制
-                if src_lbl_path.endswith(".nii.gz"):
-                    shutil.copy2(src_lbl_path, dst_lbl_path)
-                # 如果源文件是 .nii，使用 nibabel 读取并保存为压缩格式
-                elif src_lbl_path.endswith(".nii"):
-                    try:
-                        lbl_obj = nib.load(src_lbl_path)
-                        # 保存时文件名以 .nii.gz 结尾，nibabel 会自动压缩
-                        nib.save(lbl_obj, dst_lbl_path)
-                    except Exception as e:
-                        print(f"转换出错: {src_lbl_path} -> {e}")
-            else:
-                print(f"缺失: {patient_folder} 中没有 label 文件")
-
-    print("\n所有处理完成！")
-    print(f"新数据集位于: {target_root}")
+    print(f"\n✅ 文件结构重建完成！")
+    print(f"📊 统计信息:")
+    print(f"   - 成功处理: {success_count} 个病例")
+    print(f"   - 跳过: {skip_count} 个病例")
+    print(f"   - 结果保存在: {dst_root}")
+    print(f"   - 文件命名格式: {{PID}}.img.nii.gz 和 {{PID}}.label.nii.gz")
 
 
 if __name__ == "__main__":
-    process_dataset()
+    main()

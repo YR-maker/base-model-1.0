@@ -4,7 +4,7 @@ defaults:
 
 MSD8:
   sample_prop: 1
-  path: /home/yangrui/Project/Base-model/datasets/MSD08/MSD-All-Final #TODO
+  path: /home/yangrui/Project/Base-model/datasets/MSD08/MSD-61  #TODO
 
   transforms:
     train:
